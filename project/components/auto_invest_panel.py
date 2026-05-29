@@ -1,6 +1,6 @@
 import streamlit as st
 from datetime import datetime
-from services.auto_invest import load_auto_invest_config, save_auto_invest_config, load_invest_history, save_invest_history
+from services.auto_invest import load_auto_invest_config, save_auto_invest_config, load_invest_history, save_invest_history, has_invested_today
 from services.storage import save_config
 
 def add_auto_fund_callback():
@@ -23,7 +23,14 @@ def render_auto_invest_panel(funds_config, net_values, calculator):
         value=auto_config.get("enabled", False),
         help="开启后每天自动执行定投"
     )
-    
+
+    if auto_config["enabled"] != load_auto_invest_config().get("enabled"):
+        save_auto_invest_config(auto_config)
+        if auto_config["enabled"]:
+            st.sidebar.success("自动定投已启用")
+        else:
+            st.sidebar.info("自动定投已关闭")
+
     if "auto_invest_funds" not in st.session_state:
         st.session_state.auto_invest_funds = auto_config.get("auto_invest_funds", [])
     
@@ -88,8 +95,15 @@ def render_auto_invest_panel(funds_config, net_values, calculator):
     else:
         st.sidebar.write("暂无定投记录")
 
-def execute_single_invest(funds_config, net_values, auto_invest_funds):
+def execute_single_invest(funds_config, net_values, auto_invest_funds, force=False):
+    """执行单次定投操作（支持幂等性）"""
     today = datetime.now().strftime("%Y-%m-%d")
+    
+    # 幂等性检查：除非强制，否则检查当天是否已有定投记录
+    if not force and has_invested_today(today):
+        st.sidebar.warning(f"{today} 已有定投记录，如需重复执行请使用强制模式")
+        return
+    
     total_amount = 0
     transactions = []
     
@@ -110,14 +124,27 @@ def execute_single_invest(funds_config, net_values, auto_invest_funds):
                 found = False
                 for fund in funds_list:
                     if fund["code"] == code:
-                        fund["shares"] = round(fund["shares"] + shares_to_buy, 4)
+                        # 计算加权平均成本价
+                        old_shares = fund["shares"]
+                        old_cost_price = fund.get("cost_price", 0.0)
+                        new_shares = old_shares + shares_to_buy
+                        
+                        if old_shares > 0:
+                            # 摊薄成本价 = (原有份额 × 原有成本价 + 新增份额 × 当前净值) / 总份额
+                            new_cost_price = (old_shares * old_cost_price + shares_to_buy * net_value) / new_shares
+                        else:
+                            new_cost_price = net_value
+                        
+                        fund["shares"] = round(new_shares, 4)
+                        fund["cost_price"] = round(new_cost_price, 4)
                         found = True
                         break
                 if not found:
                     funds_config["funds"][category].append({
                         "code": code,
                         "name": fund_name,
-                        "shares": round(shares_to_buy, 4)
+                        "shares": round(shares_to_buy, 4),
+                        "cost_price": round(net_value, 4)
                     })
             
             total_amount += amount
@@ -134,6 +161,13 @@ def execute_single_invest(funds_config, net_values, auto_invest_funds):
     
     if transactions:
         history = load_invest_history()
+        
+        # 写入前最后验证
+        for record in history:
+            if record.get("date") == today:
+                st.sidebar.warning(f"{today} 已存在定投记录，操作已中止")
+                return
+        
         history.append({
             "date": today,
             "total_amount": total_amount,

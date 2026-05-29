@@ -1,10 +1,70 @@
 import akshare as ak
 import pandas as pd
 import time
+import requests
+import json
 from datetime import datetime, timedelta
 from services.net_value_storage import get_net_value_from_history, save_net_value_to_history
 
+def get_fund_net_value_from_akshare(fund_code):
+    """从 AkShare 获取基金净值"""
+    try:
+        fund_em_open_fund_info_df = ak.fund.fund_em.fund_open_fund_info_em(symbol=fund_code, indicator="单位净值走势")
+        if not fund_em_open_fund_info_df.empty:
+            latest = fund_em_open_fund_info_df.iloc[-1]
+            return {
+                "code": fund_code,
+                "date": str(latest["净值日期"]),
+                "net_value": float(latest["单位净值"]),
+                "change": float(latest["日增长率"]),
+                "source": "akshare"
+            }
+        return None
+    except Exception as e:
+        print(f"AkShare 获取基金 {fund_code} 净值失败: {e}")
+        return None
+
+def get_fund_net_value_from_eastmoney(fund_code):
+    """从天天基金网获取基金净值（备用数据源）"""
+    try:
+        url = f"https://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code={fund_code}&page=1&per=1"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": f"https://fund.eastmoney.com/{fund_code}.html"
+        }
+        response = requests.get(url, headers=headers, timeout=10)
+        response.encoding = "utf-8"
+        
+        content = response.text
+        if "lsjz" not in content:
+            return None
+        
+        import re
+        match = re.search(r'var\s+lsjz\s*=\s*(\[.*?\]);', content, re.DOTALL)
+        if match:
+            try:
+                data = json.loads(match.group(1))
+                if data:
+                    latest = data[0]
+                    return {
+                        "code": fund_code,
+                        "date": str(latest.get("FSRQ", "")),
+                        "net_value": float(latest.get("DWJZ", "0")),
+                        "change": float(latest.get("JZZZL", "0")),
+                        "source": "eastmoney"
+                    }
+            except Exception as e:
+                print(f"解析天天基金数据失败: {e}")
+        
+        return None
+    except Exception as e:
+        print(f"天天基金获取基金 {fund_code} 净值失败: {e}")
+        return None
+
 def get_fund_net_value(fund_code, use_cache=True):
+    """获取基金净值，实现双源fallback机制：AkShare → 天天基金 → 历史缓存"""
+    
+    # 优先从缓存读取（如果启用）
     if use_cache:
         cached_data = get_net_value_from_history(fund_code)
         if cached_data:
@@ -16,54 +76,70 @@ def get_fund_net_value(fund_code, use_cache=True):
                 "source": "cache"
             }
 
-    try:
-        fund_em_open_fund_info_df = ak.fund.fund_em.fund_open_fund_info_em(symbol=fund_code, indicator="单位净值走势")
-
-        if not fund_em_open_fund_info_df.empty:
-            latest = fund_em_open_fund_info_df.iloc[-1]
-            result = {
-                "code": fund_code,
-                "date": str(latest["净值日期"]),
-                "net_value": float(latest["单位净值"]),
-                "change": float(latest["日增长率"]),
-                "source": "realtime"
-            }
+    # 数据源优先级：AkShare → 天天基金 → 历史缓存
+    data_sources = [
+        ("akshare", get_fund_net_value_from_akshare),
+        ("eastmoney", get_fund_net_value_from_eastmoney)
+    ]
+    
+    for source_name, source_func in data_sources:
+        result = source_func(fund_code)
+        if result and result.get("net_value", 0) > 0:
             save_net_value_to_history(fund_code, result)
             return result
-        return None
-    except Exception as e:
-        print(f"获取基金 {fund_code} 净值失败: {e}")
-        if use_cache:
-            cached_data = get_net_value_from_history(fund_code)
-            if cached_data:
-                return {
-                    "code": fund_code,
-                    "date": cached_data["date"],
-                    "net_value": cached_data["net_value"],
-                    "change": cached_data["change"],
-                    "source": "cache_fallback"
-                }
-        return None
+        time.sleep(0.2)
+
+    # 所有数据源都失败，使用历史缓存兜底
+    if use_cache:
+        cached_data = get_net_value_from_history(fund_code)
+        if cached_data:
+            return {
+                "code": fund_code,
+                "date": cached_data["date"],
+                "net_value": cached_data["net_value"],
+                "change": cached_data["change"],
+                "source": "cache_fallback"
+            }
+    
+    return None
 
 def get_fund_batch_net_value(fund_codes, use_cache=True):
     results = {}
-    cache_used_codes = []
-    failed_codes = []
+    source_stats = {
+        "akshare": [],
+        "eastmoney": [],
+        "cache": [],
+        "cache_fallback": [],
+        "failed": []
+    }
 
     for code in fund_codes:
         data = get_fund_net_value(code, use_cache)
         if data:
             results[code] = data
-            if data.get("source") in ["cache", "cache_fallback"]:
-                cache_used_codes.append(code)
+            source = data.get("source", "unknown")
+            if source in source_stats:
+                source_stats[source].append(code)
+            else:
+                source_stats["failed"].append(code)
         else:
-            failed_codes.append(code)
+            source_stats["failed"].append(code)
         time.sleep(0.3)
 
-    if cache_used_codes:
-        print(f"警告: 以下基金使用历史缓存数据: {', '.join(cache_used_codes)}")
-    if failed_codes:
-        print(f"错误: 以下基金获取失败: {', '.join(failed_codes)}")
+    # 输出数据源统计信息
+    print("\n=== 净值获取数据源统计 ===")
+    print(f"AkShare: {len(source_stats['akshare'])} 只")
+    print(f"天天基金: {len(source_stats['eastmoney'])} 只")
+    print(f"缓存(优先): {len(source_stats['cache'])} 只")
+    print(f"缓存(兜底): {len(source_stats['cache_fallback'])} 只")
+    print(f"获取失败: {len(source_stats['failed'])} 只")
+    
+    if source_stats["eastmoney"]:
+        print(f"使用天天基金的基金: {', '.join(source_stats['eastmoney'])}")
+    if source_stats["cache_fallback"]:
+        print(f"使用缓存兜底的基金: {', '.join(source_stats['cache_fallback'])}")
+    if source_stats["failed"]:
+        print(f"获取失败的基金: {', '.join(source_stats['failed'])}")
 
     return results
 
@@ -71,18 +147,29 @@ def check_data_freshness(net_values):
     today = datetime.now().strftime("%Y-%m-%d")
     fresh_count = 0
     cache_count = 0
+    source_counts = {
+        "akshare": 0,
+        "eastmoney": 0,
+        "cache": 0,
+        "cache_fallback": 0
+    }
 
     for code, data in net_values.items():
         if data.get("date") == today:
             fresh_count += 1
         else:
             cache_count += 1
+        
+        source = data.get("source", "unknown")
+        if source in source_counts:
+            source_counts[source] += 1
 
     return {
         "total": len(net_values),
         "fresh": fresh_count,
         "cached": cache_count,
-        "all_fresh": fresh_count == len(net_values)
+        "all_fresh": fresh_count == len(net_values),
+        "sources": source_counts
     }
 
 def get_fund_info(fund_code):

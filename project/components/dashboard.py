@@ -10,7 +10,17 @@ def render_dashboard(category_values, current_weights, targets, net_values):
 
     freshness = check_data_freshness(net_values)
     if not freshness["all_fresh"]:
-        st.warning(f"警告: 部分数据来自历史缓存（实时:{freshness['fresh']} | 缓存:{freshness['cached']}），仅供参考")
+        sources = freshness.get("sources", {})
+        source_info = []
+        if sources.get("akshare", 0) > 0:
+            source_info.append(f"AkShare:{sources['akshare']}")
+        if sources.get("eastmoney", 0) > 0:
+            source_info.append(f"天天基金:{sources['eastmoney']}")
+        if sources.get("cache", 0) > 0:
+            source_info.append(f"缓存:{sources['cache']}")
+        if sources.get("cache_fallback", 0) > 0:
+            source_info.append(f"缓存兜底:{sources['cache_fallback']}")
+        st.warning(f"警告: 部分数据来自历史缓存（{' | '.join(source_info)}），仅供参考")
 
     st.header("📈 资产概览")
     

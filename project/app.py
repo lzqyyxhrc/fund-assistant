@@ -43,8 +43,19 @@ def load_net_values_on_startup():
                 
                 if st.session_state.net_values:
                     freshness = check_data_freshness(st.session_state.net_values)
+                    sources = freshness.get("sources", {})
+                    source_info = []
+                    if sources.get("akshare", 0) > 0:
+                        source_info.append(f"AkShare:{sources['akshare']}")
+                    if sources.get("eastmoney", 0) > 0:
+                        source_info.append(f"天天基金:{sources['eastmoney']}")
+                    if sources.get("cache", 0) > 0:
+                        source_info.append(f"缓存:{sources['cache']}")
+                    if sources.get("cache_fallback", 0) > 0:
+                        source_info.append(f"缓存兜底:{sources['cache_fallback']}")
+                    
                     if not freshness["all_fresh"]:
-                        st.warning(f"警告: 部分基金使用历史数据（实时:{freshness['fresh']} | 缓存:{freshness['cached']}），原因可能是节假日或接口异常")
+                        st.warning(f"警告: 部分基金使用历史数据（{' | '.join(source_info)}），原因可能是节假日或接口异常")
                 else:
                     st.warning("无法获取净值数据，历史缓存也为空")
             except Exception as e:
@@ -73,10 +84,21 @@ with st.sidebar:
             if all_codes:
                 st.session_state.net_values = get_fund_batch_net_value(all_codes)
                 freshness = check_data_freshness(st.session_state.net_values)
+                sources = freshness.get("sources", {})
+                source_info = []
+                if sources.get("akshare", 0) > 0:
+                    source_info.append(f"AkShare:{sources['akshare']}")
+                if sources.get("eastmoney", 0) > 0:
+                    source_info.append(f"天天基金:{sources['eastmoney']}")
+                if sources.get("cache", 0) > 0:
+                    source_info.append(f"缓存:{sources['cache']}")
+                if sources.get("cache_fallback", 0) > 0:
+                    source_info.append(f"缓存兜底:{sources['cache_fallback']}")
+                
                 if freshness["all_fresh"]:
-                    st.success("数据已刷新")
+                    st.success(f"数据已刷新（{' | '.join(source_info)}）")
                 else:
-                    st.warning(f"警告: 部分基金使用历史数据（实时:{freshness['fresh']} | 缓存:{freshness['cached']}），原因可能是节假日或接口异常")
+                    st.warning(f"警告: 部分基金使用历史数据（{' | '.join(source_info)}），原因可能是节假日或接口异常")
                 
                 auto_config = load_auto_invest_config()
                 if should_auto_invest_now(auto_config):
