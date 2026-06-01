@@ -81,3 +81,98 @@ def render_gauge_chart(category, current_weight, target_weight):
     )
     
     return fig
+
+def render_fund_net_value_chart(fund_code, fund_name, net_value_history):
+    """渲染单个基金今年以来的净值走势图"""
+    if fund_code not in net_value_history:
+        return None
+    
+    history_data = net_value_history[fund_code]
+    
+    from datetime import datetime
+    year_start = datetime.now().strftime("%Y-01-01")
+    
+    dates = []
+    net_values = []
+    changes = []
+    
+    for date_key, data in history_data.items():
+        actual_date = data.get("date", date_key)
+        if actual_date >= year_start:
+            dates.append(actual_date)
+            net_values.append(data.get("net_value", 0))
+            changes.append(data.get("change", 0))
+    
+    if not dates:
+        return None
+    
+    sorted_indices = sorted(range(len(dates)), key=lambda i: dates[i])
+    dates = [dates[i] for i in sorted_indices]
+    net_values = [net_values[i] for i in sorted_indices]
+    changes = [changes[i] for i in sorted_indices]
+    
+    fig = go.Figure()
+    
+    fig.add_trace(go.Scatter(
+        x=dates,
+        y=net_values,
+        mode='lines+markers',
+        name='单位净值',
+        line=dict(color='#1E90FF', width=2),
+        marker=dict(size=6)
+    ))
+    
+    fig.add_trace(go.Scatter(
+        x=dates,
+        y=changes,
+        mode='lines+markers',
+        name='日涨幅(%)',
+        yaxis='y2',
+        line=dict(color='#FF6347', width=1, dash='dot'),
+        marker=dict(size=4)
+    ))
+    
+    # 计算今年以来的涨跌幅
+    if len(net_values) >= 2:
+        year_return = ((net_values[-1] - net_values[0]) / net_values[0] * 100)
+        title_suffix = f"（今年以来: {year_return:+.2f}%）"
+    else:
+        title_suffix = ""
+    
+    fig.update_layout(
+        title={
+            'text': f"{fund_name} ({fund_code}) {title_suffix}",
+            'font': {'size': 14}
+        },
+        xaxis=dict(
+            title='日期',
+            tickangle=-45,
+            tickformat='%m-%d',
+            tickvals=dates,
+            type='category'
+        ),
+        yaxis=dict(
+            title='单位净值',
+            side='left',
+            tickformat='.4f'
+        ),
+        yaxis2=dict(
+            title='日涨幅(%)',
+            side='right',
+            overlaying='y',
+            tickformat='.2f',
+            showgrid=False
+        ),
+        margin=dict(t=50, b=50, l=50, r=50),
+        height=300,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        ),
+        hovermode='x unified'
+    )
+    
+    return fig

@@ -14,6 +14,24 @@ def save_net_value_history(history):
     with open(HISTORY_PATH, "w", encoding="utf-8") as f:
         json.dump(history, f, ensure_ascii=False, indent=2)
 
+def batch_save_net_value_history(fund_code, new_history):
+    """批量保存基金历史净值，合并到现有数据"""
+    history = load_net_value_history()
+    
+    if fund_code not in history:
+        history[fund_code] = {}
+    
+    # 合并新数据（新数据覆盖旧数据）
+    for date_str, data in new_history.items():
+        history[fund_code][date_str] = {
+            "date": data["date"],
+            "net_value": data["net_value"],
+            "change": data["change"],
+            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+    
+    save_net_value_history(history)
+
 def get_today_str():
     return date.today().strftime("%Y-%m-%d")
 

@@ -1,7 +1,18 @@
 import streamlit as st
-from components.charts import render_pie_chart, render_bar_chart, render_gauge_chart
+import json
+import os
+from components.charts import render_pie_chart, render_bar_chart, render_gauge_chart, render_fund_net_value_chart
 from services.storage import get_category_names, get_category_color
 from services.fund_fetcher import check_data_freshness
+
+NET_VALUE_HISTORY_PATH = "net_value_history.json"
+
+def load_net_value_history():
+    """加载净值历史数据"""
+    if os.path.exists(NET_VALUE_HISTORY_PATH):
+        with open(NET_VALUE_HISTORY_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
 
 def render_dashboard(category_values, current_weights, targets, net_values):
     total_value = sum(category_values.values())
@@ -124,6 +135,65 @@ def render_dashboard(category_values, current_weights, targets, net_values):
                 st.dataframe(data)
             else:
                 st.write("暂无持仓")
+    
+    st.divider()
+    
+    st.subheader("📊 基金净值走势（今年以来）")
+    
+    # 添加更新历史净值按钮
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        if st.button("🔄 更新历史数据", use_container_width=True):
+            from services.fund_fetcher import batch_update_history_net_value
+            
+            all_codes = []
+            for category in ["nasdaq", "dividend", "gold"]:
+                funds = st.session_state.config["funds"].get(category, [])
+                for fund in funds:
+                    if fund["code"]:
+                        all_codes.append(fund["code"])
+            
+            with st.spinner("正在获取历史净值..."):
+                batch_update_history_net_value(all_codes)
+            
+            st.success("✅ 历史净值更新完成！")
+            st.rerun()
+    
+    net_value_history = load_net_value_history()
+    
+    if not net_value_history:
+        st.info("暂无净值历史数据")
+    else:
+        category_names = get_category_names()
+        
+        all_funds = []
+        for category in ["nasdaq", "dividend", "gold"]:
+            funds = st.session_state.config["funds"].get(category, [])
+            for fund in funds:
+                if fund["code"] in net_values:
+                    all_funds.append({
+                        "code": fund["code"],
+                        "name": fund["name"],
+                        "category": category
+                    })
+        
+        if not all_funds:
+            st.info("当前持仓基金暂无净值历史数据")
+        else:
+            selected_fund = st.selectbox(
+                "选择基金查看净值走势",
+                options=range(len(all_funds)),
+                format_func=lambda i: f"{all_funds[i]['name']} ({all_funds[i]['code']})"
+            )
+            
+            if selected_fund is not None:
+                fund = all_funds[selected_fund]
+                chart = render_fund_net_value_chart(fund["code"], fund["name"], net_value_history)
+                
+                if chart:
+                    st.plotly_chart(chart, use_container_width=True)
+                else:
+                    st.info(f"基金 {fund['code']} 暂无今年以来的净值数据")
 
 def calculate_total_profit(config, net_values):
     total_cost = 0.0

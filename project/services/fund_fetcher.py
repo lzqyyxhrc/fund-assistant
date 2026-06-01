@@ -186,3 +186,156 @@ def get_fund_info(fund_code):
     except Exception as e:
         print(f"获取基金 {fund_code} 信息失败: {e}")
         return {"code": fund_code, "name": "未知基金", "type": "未知类型"}
+
+def get_fund_history_net_value_from_akshare(fund_code, start_date=None, end_date=None):
+    """从 AkShare 获取基金历史净值"""
+    try:
+        fund_em_open_fund_info_df = ak.fund.fund_em.fund_open_fund_info_em(symbol=fund_code, indicator="单位净值走势")
+        if not fund_em_open_fund_info_df.empty:
+            # 设置默认日期范围为今年以来
+            if not start_date:
+                start_date = datetime.now().strftime("%Y-01-01")
+            if not end_date:
+                end_date = datetime.now().strftime("%Y-%m-%d")
+            
+            # 筛选日期范围内的数据
+            fund_em_open_fund_info_df["净值日期"] = pd.to_datetime(fund_em_open_fund_info_df["净值日期"])
+            mask = (fund_em_open_fund_info_df["净值日期"] >= start_date) & (fund_em_open_fund_info_df["净值日期"] <= end_date)
+            filtered_df = fund_em_open_fund_info_df.loc[mask]
+            
+            history = {}
+            for _, row in filtered_df.iterrows():
+                date_str = str(row["净值日期"].date())
+                history[date_str] = {
+                    "date": date_str,
+                    "net_value": float(row["单位净值"]),
+                    "change": float(row["日增长率"]),
+                    "source": "akshare"
+                }
+            
+            return history
+        return None
+    except Exception as e:
+        print(f"AkShare 获取基金 {fund_code} 历史净值失败: {e}")
+        return None
+
+def get_fund_history_net_value_from_eastmoney(fund_code, start_date=None, end_date=None):
+    """从天天基金网获取基金历史净值（备用数据源）"""
+    try:
+        # 设置默认日期范围为今年以来
+        if not start_date:
+            start_date = datetime.now().strftime("%Y-01-01")
+        if not end_date:
+            end_date = datetime.now().strftime("%Y-%m-%d")
+        
+        # 计算需要获取的页数（每页20条）
+        url = f"https://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code={fund_code}&page=1&per=20"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": f"https://fund.eastmoney.com/{fund_code}.html"
+        }
+        
+        history = {}
+        page = 1
+        
+        while True:
+            url = f"https://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code={fund_code}&page={page}&per=20"
+            response = requests.get(url, headers=headers, timeout=10)
+            response.encoding = "utf-8"
+            
+            content = response.text
+            if "lsjz" not in content:
+                break
+            
+            import re
+            match = re.search(r'var\s+lsjz\s*=\s*(\[.*?\]);', content, re.DOTALL)
+            if not match:
+                break
+            
+            try:
+                data = json.loads(match.group(1))
+                if not data:
+                    break
+                
+                has_data = False
+                for item in data:
+                    date_str = str(item.get("FSRQ", ""))
+                    if not date_str:
+                        continue
+                    
+                    # 检查日期是否在范围内
+                    if date_str < start_date:
+                        continue
+                    if date_str > end_date:
+                        continue
+                    
+                    net_value = float(item.get("DWJZ", "0"))
+                    if net_value > 0:
+                        history[date_str] = {
+                            "date": date_str,
+                            "net_value": net_value,
+                            "change": float(item.get("JZZZL", "0")),
+                            "source": "eastmoney"
+                        }
+                        has_data = True
+                
+                # 如果当前页没有数据或日期超出范围，停止
+                if not has_data or date_str < start_date:
+                    break
+                
+                page += 1
+                time.sleep(0.2)
+                
+            except Exception as e:
+                print(f"解析天天基金历史数据失败: {e}")
+                break
+        
+        return history if history else None
+    
+    except Exception as e:
+        print(f"天天基金获取基金 {fund_code} 历史净值失败: {e}")
+        return None
+
+def get_fund_history_net_value(fund_code, start_date=None, end_date=None):
+    """获取基金历史净值，实现双源fallback机制：AkShare → 天天基金"""
+    # 设置默认日期范围为今年以来
+    if not start_date:
+        start_date = datetime.now().strftime("%Y-01-01")
+    if not end_date:
+        end_date = datetime.now().strftime("%Y-%m-%d")
+    
+    # 数据源优先级：AkShare → 天天基金
+    data_sources = [
+        ("akshare", get_fund_history_net_value_from_akshare),
+        ("eastmoney", get_fund_history_net_value_from_eastmoney)
+    ]
+    
+    for source_name, source_func in data_sources:
+        result = source_func(fund_code, start_date, end_date)
+        if result and len(result) > 0:
+            print(f"获取基金 {fund_code} 历史净值成功，共 {len(result)} 条记录")
+            return result
+        time.sleep(0.2)
+    
+    print(f"获取基金 {fund_code} 历史净值失败")
+    return None
+
+def batch_update_history_net_value(fund_codes):
+    """批量更新基金历史净值"""
+    print("\n=== 开始批量更新历史净值 ===")
+    
+    for code in fund_codes:
+        print(f"\n处理基金: {code}")
+        history = get_fund_history_net_value(code)
+        
+        if history:
+            # 保存到历史文件
+            from services.net_value_storage import batch_save_net_value_history
+            batch_save_net_value_history(code, history)
+            print(f"✅ 基金 {code} 历史净值更新完成，共 {len(history)} 条记录")
+        else:
+            print(f"❌ 基金 {code} 历史净值获取失败")
+        
+        time.sleep(0.3)
+    
+    print("\n=== 批量更新完成 ===")
