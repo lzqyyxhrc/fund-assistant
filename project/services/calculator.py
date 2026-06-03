@@ -1,12 +1,26 @@
 DEFAULT_REBALANCE_THRESHOLD = 0.02
 
 def calculate_category_value(funds, net_values):
+    """计算各分类的市值（仅计算已确认份额，不包含待确认份额）
+    
+    QDII基金采用T+2确认机制，新申购份额在确认前不计入市值计算，
+    以避免再平衡判断失准。
+    
+    Args:
+        funds: 基金配置字典
+        net_values: 净值数据字典
+        
+    Returns:
+        dict: 各分类的市值
+    """
     category_values = {}
     for category, fund_list in funds.items():
         total_value = 0
         for fund in fund_list:
             if fund["code"] in net_values:
-                total_value += fund["shares"] * net_values[fund["code"]]["net_value"]
+                # 只计算已确认份额(shares)，不包含待确认份额(pending_shares)
+                confirmed_shares = fund.get("shares", 0.0)
+                total_value += confirmed_shares * net_values[fund["code"]]["net_value"]
         category_values[category] = total_value
     return category_values
 

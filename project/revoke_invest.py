@@ -63,8 +63,8 @@ def revoke_invest(date_to_revoke):
     save_json(INVEST_HISTORY_PATH, history)
     save_json(FUNDS_CONFIG_PATH, config)
 
-    print(f"\n✅ 已成功撤回 {date_to_revoke} 的定投记录")
-    print(f"✅ 持仓已更新")
+    print("\n已成功撤回 %s 的定投记录" % date_to_revoke)
+    print("持仓已更新")
     return True
 
 if __name__ == "__main__":

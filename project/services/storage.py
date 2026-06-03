@@ -8,7 +8,24 @@ THRESHOLD_CONFIG_PATH = "threshold_config.json"
 def load_config():
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
+            config = json.load(f)
+            # 迁移旧数据格式，添加缺失的待确认字段
+            for category in config["funds"]:
+                for fund in config["funds"][category]:
+                    # 迁移旧字段：pending_shares -> pending_amount
+                    if "pending_shares" in fund and "pending_amount" not in fund:
+                        pending_cost = fund.get("pending_cost_price", 0.0)
+                        fund["pending_amount"] = fund["pending_shares"] * pending_cost
+                    if "pending_amount" not in fund:
+                        fund["pending_amount"] = 0.0
+                    # 删除旧字段
+                    if "pending_shares" in fund:
+                        del fund["pending_shares"]
+                    if "pending_cost_price" in fund:
+                        del fund["pending_cost_price"]
+                    if "pending_confirm_date" not in fund:
+                        fund["pending_confirm_date"] = None
+            return config
     return {
         "targets": {
             "nasdaq": 0.4,

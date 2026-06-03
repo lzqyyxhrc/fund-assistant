@@ -2,7 +2,7 @@ import streamlit as st
 from services.storage import load_config, save_config, load_threshold
 from services.fund_fetcher import get_fund_batch_net_value, check_data_freshness
 from services.calculator import calculate_category_value, calculate_current_weights, calculate_rebalancing_amounts, distribute_amount_to_funds, calculate_total_value
-from services.auto_invest import load_auto_invest_config, save_auto_invest_config, execute_auto_invest, check_and_execute_auto_invest, should_auto_invest_now
+from services.auto_invest import load_auto_invest_config, save_auto_invest_config, execute_auto_invest, check_and_execute_auto_invest, should_auto_invest_now, confirm_pending_shares
 from components.sidebar import render_sidebar
 from components.dashboard import render_dashboard
 from components.recommendation import render_recommendation
@@ -25,6 +25,13 @@ if "net_values" not in st.session_state:
 
 if "rebalance_threshold" not in st.session_state:
     st.session_state.rebalance_threshold = load_threshold()
+
+def confirm_pending_on_startup():
+    """启动时确认待确认份额（需要先加载净值数据）"""
+    if st.session_state.net_values:
+        confirmed_count = confirm_pending_shares(st.session_state.config, st.session_state.net_values)
+        if confirmed_count > 0:
+            save_config(st.session_state.config)
 
 def load_net_values_on_startup():
     all_codes = []
@@ -65,6 +72,7 @@ def load_net_values_on_startup():
                     st.warning("历史缓存也为空")
 
 load_net_values_on_startup()
+confirm_pending_on_startup()
 
 with st.sidebar:
     new_investment = render_sidebar()
@@ -83,6 +91,12 @@ with st.sidebar:
             
             if all_codes:
                 st.session_state.net_values = get_fund_batch_net_value(all_codes)
+                
+                # 检查并确认到期的待确认份额（使用最新净值）
+                confirmed_count = confirm_pending_shares(st.session_state.config, st.session_state.net_values)
+                if confirmed_count > 0:
+                    save_config(st.session_state.config)
+                
                 freshness = check_data_freshness(st.session_state.net_values)
                 sources = freshness.get("sources", {})
                 source_info = []

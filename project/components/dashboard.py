@@ -1,7 +1,7 @@
 import streamlit as st
 import json
 import os
-from components.charts import render_pie_chart, render_bar_chart, render_gauge_chart, render_fund_net_value_chart
+from components.charts import render_pie_chart, render_bar_chart, render_gauge_chart, render_fund_net_value_chart, calculate_fund_metrics
 from services.storage import get_category_names, get_category_color
 from services.fund_fetcher import check_data_freshness
 
@@ -54,7 +54,7 @@ def render_dashboard(category_values, current_weights, targets, net_values):
     
     if has_cache_data and yesterday_profit == 0.0 and yesterday_profit_pct == 0.0:
         # 全部数据都是缓存，无法计算昨日收益
-        st.info("ℹ️ 当前净值数据来自历史缓存，昨日收益暂不可用")
+        st.info("当前净值数据来自历史缓存，昨日收益暂不可用")
     else:
         col1, col2 = st.columns(2)
         with col1:
@@ -66,7 +66,7 @@ def render_dashboard(category_values, current_weights, targets, net_values):
             
             # 检查是否有有效数据
             if sum(category_yesterday_profit.values()) == 0.0 and has_cache_data:
-                st.info("ℹ️ 部分基金使用缓存数据，相关资产类别的昨日收益暂不可用")
+                st.info("部分基金使用缓存数据，相关资产类别的昨日收益暂不可用")
             else:
                 profit_text = "<br>".join([f"{category_names[k]}: {'+' if v >= 0 else ''}¥{v:,.2f}" for k, v in category_yesterday_profit.items()])
                 st.markdown(f"**各类资产收益：**<br>{profit_text}", unsafe_allow_html=True)
@@ -99,6 +99,9 @@ def render_dashboard(category_values, current_weights, targets, net_values):
     st.subheader("持仓明细")
     category_names = get_category_names()
     
+    # 加载净值历史数据用于计算指标
+    net_value_history = load_net_value_history()
+    
     for category in ["nasdaq", "dividend", "gold"]:
         with st.expander(f"{category_names[category]}"):
             funds = st.session_state.config["funds"].get(category, [])
@@ -108,8 +111,12 @@ def render_dashboard(category_values, current_weights, targets, net_values):
                     if fund["code"] in net_values:
                         nv = net_values[fund["code"]]
                         cost_price = fund.get("cost_price", 0.0)
-                        market_value = fund["shares"] * nv["net_value"]
-                        cost_value = fund["shares"] * cost_price if cost_price > 0 else 0
+                        shares = fund.get("shares", 0.0)
+                        pending_amount = fund.get("pending_amount", 0.0)
+                        
+                        # 只计算已确认份额的市值
+                        market_value = shares * nv["net_value"]
+                        cost_value = shares * cost_price if cost_price > 0 else 0
                         profit = market_value - cost_value
                         profit_pct = (profit / cost_value * 100) if cost_value > 0 else 0
                         
@@ -120,25 +127,38 @@ def render_dashboard(category_values, current_weights, targets, net_values):
                             if nv["date"] != today:
                                 net_value_str += f" ({nv['date']})"
                         
+                        # 计算基金指标（使用成立以来的数据）
+                        metrics = calculate_fund_metrics(fund["code"], net_value_history, "成立以来")
+                        annualized_return = f"{metrics['annualized_return'] * 100:.2f}%" if metrics['annualized_return'] is not None else "-"
+                        max_drawdown = f"{metrics['max_drawdown'] * 100:.2f}%" if metrics['max_drawdown'] is not None else "-"
+                        sharpe_ratio = f"{metrics['sharpe_ratio']:.2f}" if metrics['sharpe_ratio'] is not None else "-"
+                        
                         data.append({
                             "基金名称": fund["name"],
                             "基金代码": fund["code"],
-                            "持有份额": f"{fund['shares']:.2f}",
+                            "待确认金额": f"¥{pending_amount:.2f}" if pending_amount > 0 else "-",
                             "成本价": f"¥{cost_price:.3f}",
                             "最新净值": net_value_str,
-                            "日涨幅": f"{nv['change']:.2f}%",
                             "持仓市值": f"¥{market_value:,.2f}",
                             "持仓成本": f"¥{cost_value:,.2f}",
                             "盈亏金额": f"¥{profit:,.2f}",
-                            "盈亏比例": f"{profit_pct:.2f}%"
+                            "盈亏比例": f"{profit_pct:.2f}%",
+                            "年化收益": annualized_return,
+                            "最大回撤": max_drawdown,
+                            "夏普比率": sharpe_ratio
                         })
                 st.dataframe(data)
+                
+                # 显示待确认金额提示
+                has_pending = any(f.get("pending_amount", 0) > 0 for f in funds)
+                if has_pending:
+                    st.info("部分金额处于待确认状态，T+2个交易日后自动确认（份额=待确认金额/确认日净值），不参与当前市值计算")
             else:
                 st.write("暂无持仓")
     
     st.divider()
     
-    st.subheader("📊 基金净值走势（今年以来）")
+    st.subheader("📈 基金净值走势")
     
     # 添加更新历史净值按钮
     col1, col2 = st.columns([1, 4])
@@ -156,7 +176,7 @@ def render_dashboard(category_values, current_weights, targets, net_values):
             with st.spinner("正在获取历史净值..."):
                 batch_update_history_net_value(all_codes)
             
-            st.success("✅ 历史净值更新完成！")
+            st.success("历史净值更新完成！")
             st.rerun()
     
     net_value_history = load_net_value_history()
@@ -180,20 +200,29 @@ def render_dashboard(category_values, current_weights, targets, net_values):
         if not all_funds:
             st.info("当前持仓基金暂无净值历史数据")
         else:
-            selected_fund = st.selectbox(
-                "选择基金查看净值走势",
-                options=range(len(all_funds)),
-                format_func=lambda i: f"{all_funds[i]['name']} ({all_funds[i]['code']})"
-            )
+            col1, col2 = st.columns(2)
+            with col1:
+                selected_fund = st.selectbox(
+                    "选择基金",
+                    options=range(len(all_funds)),
+                    format_func=lambda i: f"{all_funds[i]['name']} ({all_funds[i]['code']})"
+                )
+            with col2:
+                time_range = st.radio(
+                    "时间范围",
+                    options=["今年以来", "成立以来"],
+                    index=0,
+                    horizontal=True
+                )
             
             if selected_fund is not None:
                 fund = all_funds[selected_fund]
-                chart = render_fund_net_value_chart(fund["code"], fund["name"], net_value_history)
+                chart = render_fund_net_value_chart(fund["code"], fund["name"], net_value_history, time_range)
                 
                 if chart:
                     st.plotly_chart(chart, use_container_width=True)
                 else:
-                    st.info(f"基金 {fund['code']} 暂无今年以来的净值数据")
+                    st.info(f"基金 {fund['code']} 在所选时间范围内暂无净值数据")
 
 def calculate_total_profit(config, net_values):
     total_cost = 0.0

@@ -24,7 +24,7 @@ def main():
                 all_codes.append(fund["code"])
     
     if not all_codes:
-        print("❌ 未配置基金代码")
+        print("未配置基金代码")
         return
     
     print(f"找到 {len(all_codes)} 只基金")
