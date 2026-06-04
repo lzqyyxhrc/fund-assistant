@@ -148,6 +148,7 @@ def get_fund_batch_net_value(fund_codes, use_cache=True):
 
 def check_data_freshness(net_values):
     today = datetime.now().strftime("%Y-%m-%d")
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     fresh_count = 0
     cache_count = 0
     source_counts = {
@@ -158,7 +159,10 @@ def check_data_freshness(net_values):
     }
 
     for code, data in net_values.items():
-        if data.get("date") == today:
+        # 允许今天或昨天的数据作为新鲜数据
+        # 因为基金净值通常在当天晚上公布，当天白天显示的是昨天的净值
+        data_date = data.get("date")
+        if data_date == today or data_date == yesterday:
             fresh_count += 1
         else:
             cache_count += 1

@@ -46,15 +46,56 @@ def render_dashboard(category_values, current_weights, targets, net_values):
     with col4:
         st.metric("基金数量", sum(len(funds) for funds in st.session_state.config["funds"].values()))
     
-    st.subheader("💰 昨日收益")
+    st.subheader("各类资产总收益")
+    
+    category_cost, category_market, category_profit, category_profit_pct = calculate_category_total_profit(st.session_state.config, net_values)
+    category_names = get_category_names()
+    
+    col1, col2, col3 = st.columns(3)
+    for i, category in enumerate(["nasdaq", "dividend", "gold"]):
+        with [col1, col2, col3][i]:
+            with st.container(border=True):
+                st.write(f"**{category_names[category]}**")
+                st.write(f"市值: ¥{category_market[category]:,.2f}")
+                st.write(f"成本: ¥{category_cost[category]:,.2f}")
+                profit_color = "green" if category_profit[category] >= 0 else "red"
+                st.write(f"收益: <span style='color:{profit_color};font-weight:bold'>{'+' if category_profit[category] >= 0 else ''}¥{category_profit[category]:,.2f} ({category_profit_pct[category]:.2f}%)</span>", unsafe_allow_html=True)
+    
+    st.subheader("昨日收益")
     
     # 检查是否有缓存数据
     freshness = check_data_freshness(net_values)
     has_cache_data = not freshness["all_fresh"]
     
-    if has_cache_data and yesterday_profit == 0.0 and yesterday_profit_pct == 0.0:
-        # 全部数据都是缓存，无法计算昨日收益
-        st.info("当前净值数据来自历史缓存，昨日收益暂不可用")
+    # 检查是否有任何有效数据可以计算昨日收益
+    has_valid_data = False
+    for category in ["nasdaq", "dividend", "gold"]:
+        funds = st.session_state.config["funds"].get(category, [])
+        for fund in funds:
+            if fund["code"] in net_values:
+                data_date = net_values[fund["code"]].get("date", "")
+                from datetime import datetime, timedelta
+                today = datetime.now().strftime("%Y-%m-%d")
+                yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+                day_before_yesterday = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
+                
+                if category == "nasdaq":
+                    if data_date in [today, yesterday, day_before_yesterday]:
+                        has_valid_data = True
+                        break
+                else:
+                    if data_date in [today, yesterday]:
+                        has_valid_data = True
+                        break
+        if has_valid_data:
+            break
+    
+    if not has_valid_data:
+        # 没有任何有效数据可以计算昨日收益
+        st.info("当前净值数据过于陈旧，无法计算昨日收益")
+    elif has_cache_data and yesterday_profit == 0.0:
+        # 有缓存数据但收益为0，可能是真的收益为0
+        st.info("部分基金使用缓存数据，收益计算可能不完整")
     else:
         col1, col2 = st.columns(2)
         with col1:
@@ -65,8 +106,12 @@ def render_dashboard(category_values, current_weights, targets, net_values):
             category_names = get_category_names()
             
             # 检查是否有有效数据
-            if sum(category_yesterday_profit.values()) == 0.0 and has_cache_data:
-                st.info("部分基金使用缓存数据，相关资产类别的昨日收益暂不可用")
+            if sum(category_yesterday_profit.values()) == 0.0:
+                # 只有当所有类别收益都为0时才显示提示
+                if has_cache_data:
+                    st.info("部分基金使用缓存数据，收益计算可能不完整")
+                else:
+                    st.info("今日暂无收益变动")
             else:
                 profit_text = "<br>".join([f"{category_names[k]}: {'+' if v >= 0 else ''}¥{v:,.2f}" for k, v in category_yesterday_profit.items()])
                 st.markdown(f"**各类资产收益：**<br>{profit_text}", unsafe_allow_html=True)
@@ -135,9 +180,9 @@ def render_dashboard(category_values, current_weights, targets, net_values):
                         
                         data.append({
                             "基金名称": fund["name"],
-                            "基金代码": fund["code"],
+                            "代码": fund["code"],
                             "待确认金额": f"¥{pending_amount:.2f}" if pending_amount > 0 else "-",
-                            "成本价": f"¥{cost_price:.3f}",
+                            "成本价": f"¥{cost_price:.4f}",
                             "最新净值": net_value_str,
                             "持仓市值": f"¥{market_value:,.2f}",
                             "持仓成本": f"¥{cost_value:,.2f}",
@@ -247,10 +292,14 @@ def calculate_total_profit(config, net_values):
 def calculate_yesterday_profit(config, net_values):
     """计算昨日收益（基于净值日涨幅）
     
-    注意：仅当净值数据为最新时才计算，缓存数据不参与计算以避免错误
+    根据基金类型判断数据是否可用：
+    - A股基金（红利/黄金）：T日净值在T日晚上公布，允许昨天的数据
+    - QDII基金（纳指）：T日净值在T+1日晚上公布，允许前天的数据
     """
-    from datetime import datetime
+    from datetime import datetime, timedelta
     today = datetime.now().strftime("%Y-%m-%d")
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    day_before_yesterday = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
     
     yesterday_profit = 0.0
     yesterday_profit_pct = 0.0
@@ -265,12 +314,19 @@ def calculate_yesterday_profit(config, net_values):
                 shares = fund["shares"]
                 net_value = nv["net_value"]
                 
-                # 检查数据新鲜度：只有今日数据或最新数据才参与计算
+                # 检查数据新鲜度
                 data_date = nv.get("date", "")
-                source = nv.get("source", "")
                 
-                # 如果是缓存数据（非今日），跳过计算
-                if data_date != today and source in ["cache", "cache_fallback"]:
+                # 根据基金类型判断数据是否可用
+                # 纳指QDII基金：允许今天、昨天、前天的数据（因为时差原因）
+                # A股基金：允许今天、昨天的数据
+                is_valid = False
+                if category == "nasdaq":
+                    is_valid = (data_date == today or data_date == yesterday or data_date == day_before_yesterday)
+                else:
+                    is_valid = (data_date == today or data_date == yesterday)
+                
+                if not is_valid:
                     continue
                 
                 change_pct = nv["change"] / 100  # 转换为小数
@@ -293,10 +349,37 @@ def calculate_yesterday_profit(config, net_values):
     
     return yesterday_profit, yesterday_profit_pct
 
+def calculate_category_total_profit(config, net_values):
+    """计算各类资产的总收益（成本 vs 当前市值）"""
+    category_cost = {"nasdaq": 0.0, "dividend": 0.0, "gold": 0.0}
+    category_market = {"nasdaq": 0.0, "dividend": 0.0, "gold": 0.0}
+    
+    for category in ["nasdaq", "dividend", "gold"]:
+        funds = config["funds"].get(category, [])
+        for fund in funds:
+            if fund["code"] in net_values:
+                nv = net_values[fund["code"]]
+                cost_price = fund.get("cost_price", 0.0)
+                shares = fund["shares"]
+                
+                category_cost[category] += shares * cost_price
+                category_market[category] += shares * nv["net_value"]
+    
+    # 计算总收益和收益率
+    category_profit = {}
+    category_profit_pct = {}
+    for category in ["nasdaq", "dividend", "gold"]:
+        category_profit[category] = category_market[category] - category_cost[category]
+        category_profit_pct[category] = (category_profit[category] / category_cost[category] * 100) if category_cost[category] > 0 else 0
+    
+    return category_cost, category_market, category_profit, category_profit_pct
+
 def calculate_category_yesterday_profit(config, net_values):
-    """计算各类资产的昨日收益（仅使用最新数据）"""
-    from datetime import datetime
+    """计算各类资产的昨日收益"""
+    from datetime import datetime, timedelta
     today = datetime.now().strftime("%Y-%m-%d")
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    day_before_yesterday = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
     
     category_profit = {"nasdaq": 0.0, "dividend": 0.0, "gold": 0.0}
     
@@ -310,10 +393,17 @@ def calculate_category_yesterday_profit(config, net_values):
                 
                 # 检查数据新鲜度
                 data_date = nv.get("date", "")
-                source = nv.get("source", "")
                 
-                # 如果是缓存数据（非今日），跳过计算
-                if data_date != today and source in ["cache", "cache_fallback"]:
+                # 根据基金类型判断数据是否可用
+                # 纳指QDII基金：允许今天、昨天、前天的数据（因为时差原因）
+                # A股基金：允许今天、昨天的数据
+                is_valid = False
+                if category == "nasdaq":
+                    is_valid = (data_date == today or data_date == yesterday or data_date == day_before_yesterday)
+                else:
+                    is_valid = (data_date == today or data_date == yesterday)
+                
+                if not is_valid:
                     continue
                 
                 change_pct = nv["change"] / 100

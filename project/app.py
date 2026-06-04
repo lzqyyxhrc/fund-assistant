@@ -7,6 +7,7 @@ from components.sidebar import render_sidebar
 from components.dashboard import render_dashboard
 from components.recommendation import render_recommendation
 from components.auto_invest_panel import render_auto_invest_panel
+from components.scheduler_panel import render_scheduler_panel
 
 st.set_page_config(
     page_title="基金智能定投再平衡",
@@ -14,8 +15,8 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("基金智能定投再平衡 Dashboard")
-st.markdown("根据当前持仓偏离目标仓位的程度，自动计算今日最优定投金额")
+st.title("💰 基金投资管家")
+st.markdown("智能定投 · 动态再平衡 · 实时监控您的基金组合")
 
 if "config" not in st.session_state:
     st.session_state.config = load_config()
@@ -113,13 +114,6 @@ with st.sidebar:
                     st.success(f"数据已刷新（{' | '.join(source_info)}）")
                 else:
                     st.warning(f"警告: 部分基金使用历史数据（{' | '.join(source_info)}），原因可能是节假日或接口异常")
-                
-                auto_config = load_auto_invest_config()
-                if should_auto_invest_now(auto_config):
-                    with st.spinner("正在执行自动定投..."):
-                        transactions, total_amount = check_and_execute_auto_invest(st.session_state.config, st.session_state.net_values)
-                        if transactions:
-                            st.success(f"自动定投完成！共投入 ¥{total_amount:.2f}")
             else:
                 st.warning("请先配置基金代码")
     
@@ -135,6 +129,10 @@ with st.sidebar:
         st.session_state.net_values,
         calculator_module()
     )
+    
+    st.sidebar.divider()
+    
+    render_scheduler_panel()
 
 main_container = st.container()
 

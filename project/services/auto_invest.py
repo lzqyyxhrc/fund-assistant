@@ -1,6 +1,7 @@
 import json
 import os
 from datetime import datetime, timedelta
+from services.storage import save_config
 
 AUTO_INVEST_CONFIG_PATH = "auto_invest_config.json"
 INVEST_HISTORY_PATH = "invest_history.json"
@@ -90,11 +91,13 @@ def get_fund_confirm_date(base_date_str, fund_category, after_15h=False):
 def confirm_pending_shares(funds_config, net_values=None):
     """检查并确认到期的待确认份额
     
-    在确认日，根据当日净值计算实际份额：待确认份额 = 待确认金额 / 确认日净值
+    根据净值是否已更新来确认份额：
+    - A股基金（红利/黄金）：申购日(T)净值在T日晚上公布，T日晚更新净值后即可确认
+    - QDII基金（纳指）：申购日(T)净值在T+1日晚上公布，T+1日晚更新净值后即可确认
     
     Args:
         funds_config: 基金配置
-        net_values: 净值数据（用于确认日计算份额）
+        net_values: 净值数据（用于获取申购日对应的净值）
         
     Returns:
         int: 确认的份额数量
@@ -104,39 +107,56 @@ def confirm_pending_shares(funds_config, net_values=None):
     
     for category in funds_config["funds"]:
         for fund in funds_config["funds"][category]:
-            pending_date = fund.get("pending_confirm_date")
-            if pending_date and pending_date <= today:
-                # 待确认金额
-                pending_amount = fund.get("pending_amount", 0.0)
+            # pending_date 是申购日期
+            pending_date = fund.get("pending_date")
+            if not pending_date:
+                continue
                 
-                if pending_amount > 0:
-                    # 根据确认日净值计算实际份额
-                    confirm_day_net_value = fund.get("cost_price", 1.0)  # 默认使用成本价作为保底
-                    
-                    if net_values and fund["code"] in net_values:
-                        confirm_day_net_value = net_values[fund["code"]]["net_value"]
-                    
-                    # 实际确认份额 = 待确认金额 / 确认日净值
-                    actual_shares = pending_amount / confirm_day_net_value
-                    
-                    shares = fund.get("shares", 0.0)
-                    cost_price = fund.get("cost_price", 0.0)
-                    
-                    if shares > 0:
-                        # 摊薄成本价
-                        new_cost_price = (shares * cost_price + actual_shares * confirm_day_net_value) / (shares + actual_shares)
-                        fund["cost_price"] = round(new_cost_price, 4)
-                    else:
-                        fund["cost_price"] = confirm_day_net_value
-                    
-                    fund["shares"] = round(shares + actual_shares, 4)
-                    fund["pending_amount"] = 0.0
-                    fund["pending_confirm_date"] = None
-                    confirmed_count += 1
+            # 待确认金额
+            pending_amount = fund.get("pending_amount", 0.0)
+            if pending_amount <= 0:
+                fund["pending_amount"] = 0.0
+                fund["pending_date"] = None
+                continue
+            
+            # 检查净值是否可用（只有获取到净值才能确认份额）
+            if not net_values or fund["code"] not in net_values:
+                continue
+                
+            # 判断是否可以确认（根据基金类型）
+            # - 非nasdaq基金（红利/黄金）：T日申购，T日晚净值更新后即可确认
+            # - nasdaq基金：T日申购，T+1日晚净值更新后才能确认（因为美股时差）
+            can_confirm = False
+            if category != "nasdaq":
+                # A股基金：申购日当天晚上即可确认
+                can_confirm = True
+            else:
+                # QDII基金：需要等到申购日+1天
+                pending_dt = datetime.strptime(pending_date, "%Y-%m-%d")
+                next_day = (pending_dt + timedelta(days=1)).strftime("%Y-%m-%d")
+                can_confirm = (next_day <= today)
+            
+            if can_confirm:
+                # 获取申购日期对应的净值
+                order_net_value = net_values[fund["code"]]["net_value"]
+                
+                # 实际确认份额 = 待确认金额 / 申购日净值
+                actual_shares = pending_amount / order_net_value
+                
+                shares = fund.get("shares", 0.0)
+                cost_price = fund.get("cost_price", 0.0)
+                
+                if shares > 0:
+                    # 摊薄成本价
+                    new_cost_price = (shares * cost_price + actual_shares * order_net_value) / (shares + actual_shares)
+                    fund["cost_price"] = round(new_cost_price, 4)
                 else:
-                    # 金额为0，直接清空
-                    fund["pending_amount"] = 0.0
-                    fund["pending_confirm_date"] = None
+                    fund["cost_price"] = order_net_value
+                
+                fund["shares"] = round(shares + actual_shares, 4)
+                fund["pending_amount"] = 0.0
+                fund["pending_date"] = None
+                confirmed_count += 1
     
     return confirmed_count
 
@@ -229,10 +249,10 @@ def execute_auto_invest(funds_config, net_values, auto_invest_funds, force=False
                 found = False
                 for fund in funds_list:
                     if fund["code"] == code:
-                        # 将新申购金额放入待确认状态（记录金额而非份额）
+                        # 将新申购金额放入待确认状态（只记录申购日期，净值在确认时获取）
                         pending_amount = fund.get("pending_amount", 0.0)
                         fund["pending_amount"] = round(pending_amount + amount, 2)
-                        fund["pending_confirm_date"] = confirm_date
+                        fund["pending_date"] = today  # 申购日期（用于确认时获取对应净值）
                         found = True
                         break
                 if not found:
@@ -242,7 +262,7 @@ def execute_auto_invest(funds_config, net_values, auto_invest_funds, force=False
                         "shares": 0.0,
                         "cost_price": net_value,
                         "pending_amount": round(amount, 2),
-                        "pending_confirm_date": confirm_date
+                        "pending_date": today  # 申购日期
                     })
             
             total_amount += amount
@@ -278,6 +298,9 @@ def execute_auto_invest(funds_config, net_values, auto_invest_funds, force=False
         auto_config = load_auto_invest_config()
         auto_config["last_invest_date"] = today
         save_auto_invest_config(auto_config)
+        
+        # 保存基金配置（包含待确认金额）
+        save_config(funds_config)
     
     return transactions, total_amount
 

@@ -75,16 +75,6 @@ def render_auto_invest_panel(funds_config, net_values, calculator):
         st.sidebar.success("定投计划已保存")
     
     st.sidebar.divider()
-    st.sidebar.subheader("执行定投")
-    
-    if st.sidebar.button("立即执行一次"):
-        if total_daily <= 0:
-            st.sidebar.warning("请至少设置一只基金的定投金额")
-            return
-        
-        execute_single_invest(funds_config, net_values, st.session_state.auto_invest_funds)
-    
-    st.sidebar.divider()
     st.sidebar.title("定投历史")
     
     history = load_invest_history()
@@ -94,96 +84,6 @@ def render_auto_invest_panel(funds_config, net_values, calculator):
             st.sidebar.write(f"**{record['date']}**: ¥{record['total_amount']:.2f}")
     else:
         st.sidebar.write("暂无定投记录")
-
-def execute_single_invest(funds_config, net_values, auto_invest_funds, force=False):
-    """执行单次定投操作（支持幂等性）"""
-    today = datetime.now().strftime("%Y-%m-%d")
-    
-    # 幂等性检查：除非强制，否则检查当天是否已有定投记录
-    if not force and has_invested_today(today):
-        st.sidebar.warning(f"{today} 已有定投记录，如需重复执行请使用强制模式")
-        return
-    
-    total_amount = 0
-    transactions = []
-    
-    for fund_plan in auto_invest_funds:
-        code = fund_plan["code"].strip()
-        amount = fund_plan["amount"]
-        
-        if amount > 0 and code and code in net_values:
-            net_value = net_values[code]["net_value"]
-            shares_to_buy = amount / net_value
-            
-            fund_name = net_values[code].get("name", code)
-            
-            category = find_fund_category(funds_config, code)
-            
-            if category:
-                funds_list = funds_config["funds"].get(category, [])
-                found = False
-                for fund in funds_list:
-                    if fund["code"] == code:
-                        # 计算加权平均成本价
-                        old_shares = fund["shares"]
-                        old_cost_price = fund.get("cost_price", 0.0)
-                        new_shares = old_shares + shares_to_buy
-                        
-                        if old_shares > 0:
-                            # 摊薄成本价 = (原有份额 × 原有成本价 + 新增份额 × 当前净值) / 总份额
-                            new_cost_price = (old_shares * old_cost_price + shares_to_buy * net_value) / new_shares
-                        else:
-                            new_cost_price = net_value
-                        
-                        fund["shares"] = round(new_shares, 4)
-                        fund["cost_price"] = round(new_cost_price, 4)
-                        found = True
-                        break
-                if not found:
-                    funds_config["funds"][category].append({
-                        "code": code,
-                        "name": fund_name,
-                        "shares": round(shares_to_buy, 4),
-                        "cost_price": round(net_value, 4)
-                    })
-            
-            total_amount += amount
-            
-            transactions.append({
-                "date": today,
-                "category": category or "other",
-                "code": code,
-                "name": fund_name,
-                "amount": round(amount, 2),
-                "shares": round(shares_to_buy, 4),
-                "net_value": net_value
-            })
-    
-    if transactions:
-        history = load_invest_history()
-        
-        # 写入前最后验证
-        for record in history:
-            if record.get("date") == today:
-                st.sidebar.warning(f"{today} 已存在定投记录，操作已中止")
-                return
-        
-        history.append({
-            "date": today,
-            "total_amount": total_amount,
-            "transactions": transactions
-        })
-        save_invest_history(history)
-        
-        save_config(funds_config)
-        
-        st.sidebar.success(f"定投完成！共投入 ¥{total_amount:.2f}")
-        
-        st.sidebar.subheader("定投详情")
-        for trans in transactions:
-            st.sidebar.write(f"- {trans['name']}: ¥{trans['amount']:.2f} ({trans['shares']:.4f}份)")
-    else:
-        st.sidebar.info("没有需要定投的基金")
 
 def find_fund_category(funds_config, code):
     for category, funds in funds_config["funds"].items():

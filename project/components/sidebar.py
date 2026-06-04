@@ -29,9 +29,12 @@ def render_sidebar():
         st.session_state.investment_amount = new_investment
     with col2:
         st.write("")
-        if st.button("保存", key="save_investment"):
+        if st.button("💾 保存", key="save_investment", use_container_width=True):
+            from services.storage import save_config
+            save_config(st.session_state.config)
             save_investment_amount(new_investment)
-            st.success("已保存")
+            st.success("已保存！")
+            st.rerun()
 
     if "rebalance_threshold" not in st.session_state:
         st.session_state.rebalance_threshold = load_threshold()
@@ -50,9 +53,12 @@ def render_sidebar():
         st.session_state.rebalance_threshold = threshold / 100
     with col4:
         st.write("")
-        if st.button("保存", key="save_threshold"):
+        if st.button("💾 保存", key="save_threshold", use_container_width=True):
+            from services.storage import save_config
+            save_config(st.session_state.config)
             save_threshold(threshold / 100)
-            st.success("已保存")
+            st.success("已保存！")
+            st.rerun()
 
     st.sidebar.divider()
     
@@ -66,16 +72,16 @@ def render_sidebar():
             st.write(f"目标仓位: {target_pct:.1f}%")
             
             for i, fund in enumerate(funds):
-                col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
+                col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
                 with col1:
                     updated_name = st.text_input(f"基金名称 {i+1}", fund["name"], key=f"{category}_name_{i}")
                     fund["name"] = updated_name
                 with col2:
-                    updated_code = st.text_input(f"基金代码 {i+1}", fund["code"], key=f"{category}_code_{i}")
+                    updated_code = st.text_input(f"代码 {i+1}", fund["code"], key=f"{category}_code_{i}")
                     fund["code"] = updated_code
                 with col3:
                     updated_shares = st.number_input(
-                        f"持有份额 {i+1}",
+                        f"份额 {i+1}",
                         value=float(fund["shares"]),
                         key=f"{category}_shares_{i}",
                         step=0.01,
@@ -85,11 +91,11 @@ def render_sidebar():
                 with col4:
                     cost_price = fund.get("cost_price", 0.0)
                     updated_cost = st.number_input(
-                        f"成本价 {i+1}",
+                        f"成本 {i+1}",
                         value=float(cost_price),
                         key=f"{category}_cost_{i}",
-                        step=0.001,
-                        format="%.3f"
+                        step=0.0001,
+                        format="%.4f"
                     )
                     fund["cost_price"] = updated_cost
             

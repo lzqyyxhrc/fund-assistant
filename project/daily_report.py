@@ -9,8 +9,28 @@ NET_VALUE_HISTORY_PATH = "net_value_history.json"
 
 def load_config():
     if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
+        # 尝试多种编码读取
+        encodings = ['utf-8', 'gbk', 'gb2312']
+        for encoding in encodings:
+            try:
+                with open(CONFIG_PATH, "r", encoding=encoding) as f:
+                    return json.load(f)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+        # 如果都失败，尝试二进制读取后处理
+        try:
+            with open(CONFIG_PATH, "rb") as f:
+                content = f.read()
+                # 尝试解码
+                for encoding in encodings:
+                    try:
+                        return json.loads(content.decode(encoding))
+                    except UnicodeDecodeError:
+                        continue
+                # 最后尝试替换无效字符
+                return json.loads(content.decode('utf-8', errors='replace'))
+        except Exception as e:
+            print(f"读取配置文件失败: {e}")
     return {
         "targets": {"nasdaq": 0.4, "dividend": 0.4, "gold": 0.2},
         "funds": {"nasdaq": [], "dividend": [], "gold": []}
@@ -94,15 +114,98 @@ def calculate_rebalancing_amounts(targets, category_values, total_value, new_inv
     else:
         return {category: round(new_investment / len(targets), 2) for category in targets.keys()}
 
-def generate_daily_report(api_key=None):
-    """使用 DeepSeek API 生成每日报告"""
+def generate_simple_report():
+    """生成简单的每日报告（无需API key）"""
+    config = load_config()
+    net_values = load_net_values()
     
-    # 配置 DeepSeek API
+    category_values = calculate_category_value(config, net_values)
+    current_weights = calculate_current_weights(config, net_values)
+    total_value = sum(category_values.values())
+    
+    # 计算待确认金额
+    pending_total = 0
+    for category, funds in config["funds"].items():
+        for fund in funds:
+            pending_total += fund.get("pending_amount", 0)
+    
+    targets = config.get("targets", {"nasdaq": 0.4, "dividend": 0.4, "gold": 0.2})
+    
+    report = f"""基金投资日报
+====================================
+
+日期: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+【总资产概览】
+----------------
+总市值: {total_value:,.2f}
+待确认金额: {pending_total:,.2f}
+
+【资产配置】
+----------------
+| 资产类别 | 市值 | 当前占比 | 目标占比 | 偏离度 |
+|---------|------|---------|---------|--------|
+| 纳斯达克 | {category_values.get('nasdaq', 0):,.2f} | {current_weights.get('nasdaq', 0):.1f}% | {targets['nasdaq'] * 100:.0f}% | {current_weights.get('nasdaq', 0) - targets['nasdaq'] * 100:+.1f}% |
+| 红利低波 | {category_values.get('dividend', 0):,.2f} | {current_weights.get('dividend', 0):.1f}% | {targets['dividend'] * 100:.0f}% | {current_weights.get('dividend', 0) - targets['dividend'] * 100:+.1f}% |
+| 黄金ETF | {category_values.get('gold', 0):,.2f} | {current_weights.get('gold', 0):.1f}% | {targets['gold'] * 100:.0f}% | {current_weights.get('gold', 0) - targets['gold'] * 100:+.1f}% |
+
+【持仓明细】
+----------------
+"""
+    
+    category_names = {
+        "nasdaq": "纳斯达克",
+        "dividend": "红利低波",
+        "gold": "黄金ETF"
+    }
+    
+    for category, funds in config["funds"].items():
+        report += f"\n【{category_names.get(category, category)}】\n"
+        for fund in funds:
+            if fund["code"] in net_values:
+                nv = net_values[fund["code"]]
+                market_value = fund["shares"] * nv["net_value"]
+                cost_value = fund["shares"] * fund.get("cost_price", 0)
+                profit = market_value - cost_value
+                profit_pct = (profit / cost_value * 100) if cost_value > 0 else 0
+                change = nv.get("change", 0)
+                
+                name = fund['name']
+                # 解码Unicode转义字符（处理中文乱码）
+                try:
+                    # 处理已编码的Unicode转义字符
+                    if isinstance(name, str):
+                        # 尝试从原始字符串解码
+                        name = name.encode('latin-1').decode('unicode-escape')
+                except:
+                    try:
+                        # 其他解码方式
+                        if isinstance(name, str) and '\\u' in repr(name):
+                            name = bytes(name, 'utf-8').decode('unicode_escape')
+                    except:
+                        pass
+                
+                pending = fund.get("pending_amount", 0)
+                pending_str = f" (待确认: {pending:.2f})" if pending > 0 else ""
+                
+                report += f"  {name} ({fund['code']}): {fund['shares']:.4f}份 @ {nv['net_value']:.4f} = {market_value:,.2f} | 成本: {cost_value:,.2f} | 收益: {profit:+.2f} ({profit_pct:+.2f}%) | 日涨跌: {change:+.2f}%{pending_str}\n"
+    
+    report += f"\n====================================\n报告结束"
+    return report
+
+def generate_daily_report(api_key=None):
+    """生成每日报告（优先使用API，无API时生成简单报告）"""
+    
+    # 如果没有API key，生成简单报告
     if not api_key:
         api_key = os.environ.get('DEEPSEEK_API_KEY')
+    
     if not api_key:
-        print("错误: 请提供 API key")
-        return None
+        print("未配置API key，生成简单报告")
+        return generate_simple_report()
+    
+    # 配置 DeepSeek API
+    print("使用DeepSeek API生成报告...")
     
     client = OpenAI(
         api_key=api_key,
@@ -121,52 +224,86 @@ def generate_daily_report(api_key=None):
     category_values = calculate_category_value(config, net_values)
     total_value = sum(category_values.values())
     targets = config.get("targets", {"nasdaq": 0.4, "dividend": 0.4, "gold": 0.2})
-    new_investment = 1200  # 默认定投金额
     
-    rebalancing_amounts = calculate_rebalancing_amounts(targets, category_values, total_value, new_investment)
+    # 计算待确认金额
+    pending_total = 0
+    for category, funds in config["funds"].items():
+        for fund in funds:
+            pending_total += fund.get("pending_amount", 0)
+    
+    # 计算各类资产收益
+    category_profit = {}
+    category_cost = {}
+    for category in ["nasdaq", "dividend", "gold"]:
+        cost = 0
+        market = 0
+        for fund in config["funds"].get(category, []):
+            if fund["code"] in net_values:
+                cost += fund["shares"] * fund.get("cost_price", 0)
+                market += fund["shares"] * net_values[fund["code"]]["net_value"]
+        category_cost[category] = cost
+        category_profit[category] = market - cost
+    
+    # 准备持仓明细
+    holdings_detail = []
+    for category, funds in config["funds"].items():
+        for fund in funds:
+            if fund["code"] in net_values:
+                nv = net_values[fund["code"]]
+                market_value = fund["shares"] * nv["net_value"]
+                cost_value = fund["shares"] * fund.get("cost_price", 0)
+                profit = market_value - cost_value
+                profit_pct = (profit / cost_value * 100) if cost_value > 0 else 0
+                holdings_detail.append({
+                    "name": fund["name"],
+                    "code": fund["code"],
+                    "category": category,
+                    "shares": fund["shares"],
+                    "net_value": nv["net_value"],
+                    "cost_price": fund.get("cost_price", 0),
+                    "market_value": market_value,
+                    "profit": profit,
+                    "profit_pct": profit_pct,
+                    "change": nv.get("change", 0),
+                    "pending_amount": fund.get("pending_amount", 0)
+                })
     
     # 准备请求消息
     messages = [
         {
             "role": "system",
-            "content": "你是一位专业的基金投资顾问，擅长分析投资组合和生成专业的投资报告。请用中文回复。"
+            "content": """你是一位专业的基金投资顾问，擅长分析投资组合和生成专业的投资报告。
+请用中文回复，格式清晰，使用markdown格式。
+报告应该包含：日期、总资产概览、资产配置表、持仓明细、市场分析、定投建议等部分。"""
         },
         {
             "role": "user",
             "content": f"""
-请帮我生成一份{today}的基金投资日报，包含以下内容：
+请帮我生成一份{today}的基金投资日报，基于以下实际持仓数据：
 
-【实际持仓数据】
-- 总资产市值: ¥{total_value:,.2f}
-- 纳指类资产当前占比: {current_weights['nasdaq']}%，目标40%，当前市值¥{category_values.get('nasdaq', 0):,.2f}
-- 红利低波类资产当前占比: {current_weights['dividend']}%，目标40%，当前市值¥{category_values.get('dividend', 0):,.2f}
-- 黄金类资产当前占比: {current_weights['gold']}%，目标20%，当前市值¥{category_values.get('gold', 0):,.2f}
+【基本信息】
+- 报告日期: {today}
+- 总资产市值: {total_value:,.2f}
+- 待确认金额: {pending_total:,.2f}
 
-【定投分配方案（基于再平衡算法）】
-假设今日定投¥{new_investment}，建议分配如下：
-- 纳指类: ¥{rebalancing_amounts.get('nasdaq', 0):,.2f}
-- 红利低波类: ¥{rebalancing_amounts.get('dividend', 0):,.2f}
-- 黄金类: ¥{rebalancing_amounts.get('gold', 0):,.2f}
+【资产配置】
+| 资产类别 | 市值 | 当前占比 | 目标占比 | 偏离度 | 收益 |
+|---------|------|---------|---------|--------|------|
+| 纳斯达克 | {category_values.get('nasdaq', 0):,.2f} | {current_weights.get('nasdaq', 0):.1f}% | {targets['nasdaq'] * 100:.0f}% | {current_weights.get('nasdaq', 0) - targets['nasdaq'] * 100:+.1f}% | {category_profit.get('nasdaq', 0):+.2f} |
+| 红利低波 | {category_values.get('dividend', 0):,.2f} | {current_weights.get('dividend', 0):.1f}% | {targets['dividend'] * 100:.0f}% | {current_weights.get('dividend', 0) - targets['dividend'] * 100:+.1f}% | {category_profit.get('dividend', 0):+.2f} |
+| 黄金ETF | {category_values.get('gold', 0):,.2f} | {current_weights.get('gold', 0):.1f}% | {targets['gold'] * 100:.0f}% | {current_weights.get('gold', 0) - targets['gold'] * 100:+.1f}% | {category_profit.get('gold', 0):+.2f} |
 
-1. 市场概览
-   - 今日全球主要市场表现（美股、A股、港股）
-   - 主要指数走势分析
+【持仓明细】
+{json.dumps(holdings_detail, ensure_ascii=False, indent=2)}
 
-2. 基金投资组合分析
-   - 资产配置比例（基于上述实际持仓数据）
-   - 各类资产表现分析
-   - 仓位偏离度评估
+请生成一份专业的投资日报，包含：
+1. 市场概览 - 简要分析今日全球主要市场表现
+2. 投资组合分析 - 基于上述数据进行资产配置分析
+3. 持仓明细 - 展示各基金的持仓情况、收益等
+4. 定投建议 - 根据当前仓位偏离情况给出定投建议
+5. 风险提示 - 简要提示潜在风险因素
 
-3. 定投建议
-   - 基于以上精确的再平衡分配方案，给出具体的定投建议
-   - 在报告中直接使用这些数字，格式如："建议今日投入¥{new_investment}，其中纳指¥{rebalancing_amounts.get('nasdaq', 0):,.2f}、红利¥{rebalancing_amounts.get('dividend', 0):,.2f}、黄金¥{rebalancing_amounts.get('gold', 0):,.2f}"
-   - 说明是否需要再平衡调整及原因
-
-4. 市场热点与风险提示
-   - 今日重要财经新闻
-   - 潜在风险因素
-
-请以专业、简洁的格式输出报告。
+请使用中文，格式清晰易读。
 """
         }
     ]
@@ -186,6 +323,24 @@ def generate_daily_report(api_key=None):
         print(f"调用 DeepSeek API 失败: {e}")
         return None
 
+def decode_unicode_text(text):
+    """解码Unicode转义字符，处理中文乱码"""
+    if not text:
+        return text
+    
+    # 检查是否包含Unicode转义序列
+    if '\\u' in text:
+        try:
+            # 处理已编码的Unicode转义字符
+            return text.encode('latin-1').decode('unicode-escape')
+        except:
+            try:
+                return bytes(text, 'utf-8').decode('unicode_escape')
+            except:
+                pass
+    
+    return text
+
 def save_report(report_content):
     """保存报告到文件"""
     today = datetime.now().strftime("%Y-%m-%d")
@@ -193,6 +348,9 @@ def save_report(report_content):
     
     if not os.path.exists(report_dir):
         os.makedirs(report_dir)
+    
+    # 解码可能的Unicode转义字符
+    report_content = decode_unicode_text(report_content)
     
     filename = f"{report_dir}/daily_report_{today}.md"
     with open(filename, "w", encoding="utf-8") as f:
@@ -208,11 +366,14 @@ def send_to_feishu(report_content, webhook_url):
     """发送报告到飞书"""
     today = datetime.now().strftime("%Y-%m-%d")
     
+    # 解码可能的Unicode转义字符
+    report_content = decode_unicode_text(report_content)
+    
     # 飞书消息格式
     payload = {
         "msg_type": "text",
         "content": {
-            "text": f"📊 **{today} 基金投资日报**\n\n{report_content}"
+            "text": f"【{today} 基金投资日报】\n\n{report_content}"
         }
     }
     
