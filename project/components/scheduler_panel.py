@@ -51,7 +51,7 @@ def render_scheduler_panel():
                     with col3:
                         st.write(f"下次执行: {job['next_run_time']}")
                     with col4:
-                        if st.button(f"立即执行", key=f"run_{job['id']}", use_container_width=True):
+                        if st.button(f"立即执行", key=f"run_{job['id']}", width='stretch'):
                             success, msg = run_job_now(job['id'])
                             if success:
                                 st.success(msg)

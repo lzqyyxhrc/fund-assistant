@@ -67,17 +67,38 @@ def get_fund_net_value_from_eastmoney(fund_code):
 def get_fund_net_value(fund_code, use_cache=True):
     """获取基金净值，实现双源fallback机制：AkShare → 天天基金 → 历史缓存"""
     
-    # 优先从缓存读取（如果启用）
+    # 根据基金代码判断类型
+    # A股基金：晚上10点可以拿到当天净值
+    # 美股基金（如纳指ETF）：晚上10点只能拿到前一天净值（因为美股收盘晚）
+    is_us_fund = _is_us_etf(fund_code)
+    
+    # 检查缓存数据的新鲜度
     if use_cache:
         cached_data = get_net_value_from_history(fund_code)
         if cached_data:
-            return {
-                "code": fund_code,
-                "date": cached_data["date"],
-                "net_value": cached_data["net_value"],
-                "change": cached_data["change"],
-                "source": "cache"
-            }
+            # 检查净值日期是否是最近的
+            from datetime import datetime, timedelta
+            net_value_date = datetime.strptime(cached_data["date"], "%Y-%m-%d")
+            today = datetime.now()
+            
+            # 根据基金类型确定最大允许延迟
+            max_delay = 0 if not is_us_fund else 1  # A股0天，美股1天
+            
+            days_diff = (today - net_value_date).days
+            if days_diff <= max_delay:
+                return {
+                    "code": fund_code,
+                    "date": cached_data["date"],
+                    "net_value": cached_data["net_value"],
+                    "change": cached_data["change"],
+                    "source": "cache"
+                }
+            else:
+                # 净值日期太旧，尝试获取最新数据
+                if is_us_fund:
+                    print(f"[INFO] 基金 {fund_code} (美股) 缓存净值日期({cached_data['date']})已过期，尝试获取最新数据")
+                else:
+                    print(f"[INFO] 基金 {fund_code} (A股) 缓存净值日期({cached_data['date']})已过期，尝试获取最新数据")
 
     # 数据源优先级：AkShare → 天天基金 → 历史缓存
     data_sources = [
@@ -105,6 +126,39 @@ def get_fund_net_value(fund_code, use_cache=True):
             }
     
     return None
+
+
+def _is_us_etf(fund_code):
+    """
+    判断是否是投资美股的ETF
+    
+    规则：
+    - 纳指类基金（nasdaq）：投资美股，晚上10点只能拿到前一天净值
+    - 红利类基金（dividend）：A股，晚上10点可以拿到当天净值
+    - 黄金类基金（gold）：可能是A股或现货，晚上10点可以拿到当天净值
+    """
+    try:
+        from services.storage import load_config
+        
+        config = load_config()
+        
+        # 检查基金属于哪个类别
+        for category in ["nasdaq", "dividend", "gold"]:
+            for fund in config["funds"].get(category, []):
+                if fund.get("code") == fund_code:
+                    # 纳指类基金是投资美股
+                    if category == "nasdaq":
+                        return True
+                    else:
+                        return False
+        
+        # 如果配置中没有找到，默认为A股
+        return False
+        
+    except Exception as e:
+        # 如果读取配置失败，默认为A股
+        print(f"[WARN] 无法判断基金类型: {fund_code}, 默认为A股")
+        return False
 
 def get_fund_batch_net_value(fund_codes, use_cache=True):
     results = {}

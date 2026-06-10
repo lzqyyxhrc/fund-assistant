@@ -3,51 +3,23 @@ import json
 import requests
 from datetime import datetime
 from openai import OpenAI
+from services.storage import load_config as load_config_from_db
+from services.net_value_storage import load_net_value_history
 
-CONFIG_PATH = "funds_config.json"
-NET_VALUE_HISTORY_PATH = "net_value_history.json"
 
 def load_config():
-    if os.path.exists(CONFIG_PATH):
-        # 尝试多种编码读取
-        encodings = ['utf-8', 'gbk', 'gb2312']
-        for encoding in encodings:
-            try:
-                with open(CONFIG_PATH, "r", encoding=encoding) as f:
-                    return json.load(f)
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                continue
-        # 如果都失败，尝试二进制读取后处理
-        try:
-            with open(CONFIG_PATH, "rb") as f:
-                content = f.read()
-                # 尝试解码
-                for encoding in encodings:
-                    try:
-                        return json.loads(content.decode(encoding))
-                    except UnicodeDecodeError:
-                        continue
-                # 最后尝试替换无效字符
-                return json.loads(content.decode('utf-8', errors='replace'))
-        except Exception as e:
-            print(f"读取配置文件失败: {e}")
-    return {
-        "targets": {"nasdaq": 0.4, "dividend": 0.4, "gold": 0.2},
-        "funds": {"nasdaq": [], "dividend": [], "gold": []}
-    }
+    return load_config_from_db()
+
 
 def load_net_values():
-    if os.path.exists(NET_VALUE_HISTORY_PATH):
-        with open(NET_VALUE_HISTORY_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if data:
-                # 返回最新日期的净值数据，结构是 {基金代码: 最新净值数据}
-                result = {}
-                for code, dates in data.items():
-                    if dates:
-                        latest_date = max(dates.keys())
-                        result[code] = dates[latest_date]
-                return result
+    data = load_net_value_history()
+    if data:
+        result = {}
+        for code, dates in data.items():
+            if dates:
+                latest_date = max(dates.keys())
+                result[code] = dates[latest_date]
+        return result
     return {}
 
 def calculate_category_value(config, net_values):
@@ -123,11 +95,12 @@ def generate_simple_report():
     current_weights = calculate_current_weights(config, net_values)
     total_value = sum(category_values.values())
     
-    # 计算待确认金额
+    # 计算待确认金额（支持多笔待确认订单）
     pending_total = 0
     for category, funds in config["funds"].items():
         for fund in funds:
-            pending_total += fund.get("pending_amount", 0)
+            pending_orders = fund.get("pending_orders", [])
+            pending_total += sum(order.get("amount", 0) for order in pending_orders)
     
     targets = config.get("targets", {"nasdaq": 0.4, "dividend": 0.4, "gold": 0.2})
     
@@ -185,7 +158,9 @@ def generate_simple_report():
                     except:
                         pass
                 
-                pending = fund.get("pending_amount", 0)
+                # 计算待确认金额（支持多笔待确认订单）
+                pending_orders = fund.get("pending_orders", [])
+                pending = sum(order.get("amount", 0) for order in pending_orders)
                 pending_str = f" (待确认: {pending:.2f})" if pending > 0 else ""
                 
                 report += f"  {name} ({fund['code']}): {fund['shares']:.4f}份 @ {nv['net_value']:.4f} = {market_value:,.2f} | 成本: {cost_value:,.2f} | 收益: {profit:+.2f} ({profit_pct:+.2f}%) | 日涨跌: {change:+.2f}%{pending_str}\n"
@@ -225,11 +200,12 @@ def generate_daily_report(api_key=None):
     total_value = sum(category_values.values())
     targets = config.get("targets", {"nasdaq": 0.4, "dividend": 0.4, "gold": 0.2})
     
-    # 计算待确认金额
+    # 计算待确认金额（支持多笔待确认订单）
     pending_total = 0
     for category, funds in config["funds"].items():
         for fund in funds:
-            pending_total += fund.get("pending_amount", 0)
+            pending_orders = fund.get("pending_orders", [])
+            pending_total += sum(order.get("amount", 0) for order in pending_orders)
     
     # 计算各类资产收益
     category_profit = {}
@@ -265,7 +241,7 @@ def generate_daily_report(api_key=None):
                     "profit": profit,
                     "profit_pct": profit_pct,
                     "change": nv.get("change", 0),
-                    "pending_amount": fund.get("pending_amount", 0)
+                    "pending_amount": sum(order.get("amount", 0) for order in fund.get("pending_orders", []))
                 })
     
     # 准备请求消息

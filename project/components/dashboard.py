@@ -1,18 +1,9 @@
 import streamlit as st
-import json
-import os
-from components.charts import render_pie_chart, render_bar_chart, render_gauge_chart, render_fund_net_value_chart, calculate_fund_metrics
-from services.storage import get_category_names, get_category_color
+from components.charts import render_pie_chart, render_bar_chart, render_fund_net_value_chart, calculate_fund_metrics
+from components.index_chart import render_index_comparison_chart, get_index_performance, get_portfolio_performance
+from services.storage import get_category_names, get_category_color, save_config
 from services.fund_fetcher import check_data_freshness
-
-NET_VALUE_HISTORY_PATH = "net_value_history.json"
-
-def load_net_value_history():
-    """加载净值历史数据"""
-    if os.path.exists(NET_VALUE_HISTORY_PATH):
-        with open(NET_VALUE_HISTORY_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+from services.net_value_storage import get_fund_history_data, load_net_value_history
 
 def render_dashboard(category_values, current_weights, targets, net_values):
     total_value = sum(category_values.values())
@@ -120,86 +111,147 @@ def render_dashboard(category_values, current_weights, targets, net_values):
     
     col1, col2 = st.columns(2)
     with col1:
-        st.plotly_chart(render_pie_chart(category_values, targets), use_container_width=True)
+        st.plotly_chart(render_pie_chart(category_values, targets), width='stretch')
     with col2:
-        st.plotly_chart(render_bar_chart(current_weights, targets), use_container_width=True)
+        st.plotly_chart(render_bar_chart(current_weights, targets), width='stretch')
     
     st.divider()
-    
-    st.subheader("仓位偏离度")
-    col1, col2, col3 = st.columns(3)
-    
-    categories = ["nasdaq", "dividend", "gold"]
-    for i, category in enumerate(categories):
-        with [col1, col2, col3][i]:
-            current_weight = current_weights.get(category, 0) if isinstance(current_weights, dict) else 0
-            target_weight = targets.get(category, 0) if isinstance(targets, dict) else 0
-            st.plotly_chart(
-                render_gauge_chart(category, current_weight, target_weight),
-                use_container_width=True
-            )
-    
-    st.divider()
-    
+
     st.subheader("持仓明细")
     category_names = get_category_names()
-    
+
     # 加载净值历史数据用于计算指标
     net_value_history = load_net_value_history()
-    
-    for category in ["nasdaq", "dividend", "gold"]:
-        with st.expander(f"{category_names[category]}"):
-            funds = st.session_state.config["funds"].get(category, [])
-            if funds:
-                data = []
-                for fund in funds:
-                    if fund["code"] in net_values:
-                        nv = net_values[fund["code"]]
-                        cost_price = fund.get("cost_price", 0.0)
-                        shares = fund.get("shares", 0.0)
-                        pending_amount = fund.get("pending_amount", 0.0)
-                        
-                        # 只计算已确认份额的市值
-                        market_value = shares * nv["net_value"]
-                        cost_value = shares * cost_price if cost_price > 0 else 0
-                        profit = market_value - cost_value
-                        profit_pct = (profit / cost_value * 100) if cost_value > 0 else 0
-                        
-                        net_value_str = f"¥{nv['net_value']:.4f}"
-                        if "date" in nv:
-                            from datetime import datetime
-                            today = datetime.now().strftime("%Y-%m-%d")
-                            if nv["date"] != today:
-                                net_value_str += f" ({nv['date']})"
-                        
-                        # 计算基金指标（使用成立以来的数据）
-                        metrics = calculate_fund_metrics(fund["code"], net_value_history, "成立以来")
-                        annualized_return = f"{metrics['annualized_return'] * 100:.2f}%" if metrics['annualized_return'] is not None else "-"
-                        max_drawdown = f"{metrics['max_drawdown'] * 100:.2f}%" if metrics['max_drawdown'] is not None else "-"
-                        sharpe_ratio = f"{metrics['sharpe_ratio']:.2f}" if metrics['sharpe_ratio'] is not None else "-"
-                        
-                        data.append({
-                            "基金名称": fund["name"],
-                            "代码": fund["code"],
-                            "待确认金额": f"¥{pending_amount:.2f}" if pending_amount > 0 else "-",
-                            "成本价": f"¥{cost_price:.4f}",
-                            "最新净值": net_value_str,
-                            "持仓市值": f"¥{market_value:,.2f}",
-                            "持仓成本": f"¥{cost_value:,.2f}",
-                            "盈亏金额": f"¥{profit:,.2f}",
-                            "盈亏比例": f"{profit_pct:.2f}%",
-                            "年化收益": annualized_return,
-                            "最大回撤": max_drawdown,
-                            "夏普比率": sharpe_ratio
-                        })
-                st.dataframe(data)
-                
-                # 显示待确认金额提示
-                has_pending = any(f.get("pending_amount", 0) > 0 for f in funds)
-                if has_pending:
-                    st.info("部分金额处于待确认状态，T+2个交易日后自动确认（份额=待确认金额/确认日净值），不参与当前市值计算")
+
+    # 编辑模式切换
+    if "edit_mode" not in st.session_state:
+        st.session_state.edit_mode = False
+
+    col_edit, col_save = st.columns([1, 1])
+    with col_edit:
+        if st.button("编辑模式" if not st.session_state.edit_mode else "退出编辑", type="primary" if st.session_state.edit_mode else "secondary", key="portfolio_edit_mode_btn"):
+            st.session_state.edit_mode = not st.session_state.edit_mode
+            if st.session_state.edit_mode:
+                # 进入编辑模式时，深拷贝配置到临时变量
+                import copy
+                st.session_state.edit_config = copy.deepcopy(st.session_state.config)
             else:
-                st.write("暂无持仓")
+                # 退出编辑时清除临时变量
+                if "edit_config" in st.session_state:
+                    del st.session_state.edit_config
+            st.rerun()
+
+    with col_save:
+        if st.session_state.edit_mode and st.button("💾 保存修改", key="save_all_portfolio", type="primary"):
+            import copy
+            st.session_state.config = copy.deepcopy(st.session_state.edit_config)
+            save_config(st.session_state.config)
+            st.success("保存成功！")
+            st.rerun()
+
+    # 确保编辑模式下 edit_config 始终可用
+    if st.session_state.edit_mode and "edit_config" not in st.session_state:
+        import copy
+        st.session_state.edit_config = copy.deepcopy(st.session_state.config)
+
+    # 编辑模式使用 edit_config，否则用 config
+    work_config = st.session_state.get("edit_config", st.session_state.config) if st.session_state.edit_mode else st.session_state.config
+
+    for category in ["nasdaq", "dividend", "gold"]:
+        with st.expander(f"{category_names[category]}", expanded=True):
+            funds = work_config["funds"].get(category, [])
+
+            if st.session_state.edit_mode:
+                # 编辑模式：显示可编辑的卡片
+                for i, fund in enumerate(funds):
+                    with st.container():
+                        col_name, col_code, col_shares, col_cost, col_del = st.columns([3, 2, 2, 2, 1])
+
+                        with col_name:
+                            fund["name"] = st.text_input("名称", fund.get("name", ""), key=f"edit_name_{category}_{i}", label_visibility="collapsed")
+
+                        with col_code:
+                            fund["code"] = st.text_input("代码", fund.get("code", ""), key=f"edit_code_{category}_{i}", label_visibility="collapsed")
+
+                        with col_shares:
+                            fund["shares"] = st.number_input("份额", value=float(fund.get("shares", 0.0)), step=0.01, key=f"edit_shares_{category}_{i}", label_visibility="collapsed")
+
+                        with col_cost:
+                            fund["cost_price"] = st.number_input("成本", value=float(fund.get("cost_price", 0.0)), step=0.0001, format="%.4f", key=f"edit_cost_{category}_{i}", label_visibility="collapsed")
+
+                        with col_del:
+                            if st.button("删除", key=f"del_{category}_{i}", type="secondary"):
+                                st.session_state.edit_config["funds"][category].pop(i)
+                                st.rerun()
+
+                        st.divider()
+
+                # 添加新基金按钮
+                if st.button(f"+ 添加{category_names[category]}基金", key=f"edit_add_{category}"):
+                    if category not in st.session_state.edit_config["funds"]:
+                        st.session_state.edit_config["funds"][category] = []
+                    st.session_state.edit_config["funds"][category].append({
+                        "name": "",
+                        "code": "",
+                        "shares": 0.0,
+                        "cost_price": 0.0
+                    })
+                    st.rerun()
+
+            else:
+                # 查看模式：显示只读数据
+                if funds:
+                    data = []
+                    for fund in funds:
+                        if fund["code"] in net_values:
+                            nv = net_values[fund["code"]]
+                            cost_price = fund.get("cost_price", 0.0)
+                            shares = fund.get("shares", 0.0)
+                            # 计算待确认金额（支持多笔待确认订单）
+                            pending_orders = fund.get("pending_orders", [])
+                            pending_amount = sum(order.get("amount", 0) for order in pending_orders)
+
+                            # 只计算已确认份额的市值
+                            market_value = shares * nv["net_value"]
+                            cost_value = shares * cost_price if cost_price > 0 else 0
+                            profit = market_value - cost_value
+                            profit_pct = (profit / cost_value * 100) if cost_value > 0 else 0
+
+                            net_value_str = f"¥{nv['net_value']:.4f}"
+                            if "date" in nv:
+                                from datetime import datetime
+                                today = datetime.now().strftime("%Y-%m-%d")
+                                if nv["date"] != today:
+                                    net_value_str += f" ({nv['date']})"
+
+                            # 计算基金指标（使用成立以来的数据）
+                            metrics = calculate_fund_metrics(fund["code"], net_value_history, "成立以来")
+                            annualized_return = f"{metrics['annualized_return'] * 100:.2f}%" if metrics['annualized_return'] is not None else "-"
+                            max_drawdown = f"{metrics['max_drawdown'] * 100:.2f}%" if metrics['max_drawdown'] is not None else "-"
+                            sharpe_ratio = f"{metrics['sharpe_ratio']:.2f}" if metrics['sharpe_ratio'] is not None else "-"
+
+                            data.append({
+                                "基金名称": fund["name"],
+                                "代码": fund["code"],
+                                "待确认金额": f"¥{pending_amount:.2f}" if pending_amount > 0 else "-",
+                                "成本价": f"¥{cost_price:.4f}",
+                                "最新净值": net_value_str,
+                                "持仓市值": f"¥{market_value:,.2f}",
+                                "持仓成本": f"¥{cost_value:,.2f}",
+                                "盈亏金额": f"¥{profit:,.2f}",
+                                "盈亏比例": f"{profit_pct:.2f}%",
+                                "年化收益": annualized_return,
+                                "最大回撤": max_drawdown,
+                                "夏普比率": sharpe_ratio
+                            })
+                    st.dataframe(data, use_container_width=True, hide_index=True)
+
+                    # 显示待确认金额提示
+                    has_pending = any(sum(order.get("amount", 0) for order in f.get("pending_orders", [])) > 0 for f in funds)
+                    if has_pending:
+                        st.info("部分金额处于待确认状态，待净值日期的净值更新后自动确认（份额=待确认金额/净值日期净值），不参与当前市值计算")
+                else:
+                    st.write("暂无持仓")
     
     st.divider()
     
@@ -208,7 +260,7 @@ def render_dashboard(category_values, current_weights, targets, net_values):
     # 添加更新历史净值按钮
     col1, col2 = st.columns([1, 4])
     with col1:
-        if st.button("🔄 更新历史数据", use_container_width=True):
+        if st.button("🔄 更新历史数据", width='stretch'):
             from services.fund_fetcher import batch_update_history_net_value
             
             all_codes = []
@@ -265,9 +317,176 @@ def render_dashboard(category_values, current_weights, targets, net_values):
                 chart = render_fund_net_value_chart(fund["code"], fund["name"], net_value_history, time_range)
                 
                 if chart:
-                    st.plotly_chart(chart, use_container_width=True)
+                    st.plotly_chart(chart, width='stretch')
                 else:
                     st.info(f"基金 {fund['code']} 在所选时间范围内暂无净值数据")
+
+    st.divider()
+    
+    st.subheader("📊 指数对比分析")
+    
+    # 指数对比图
+    index_chart = render_index_comparison_chart()
+    if index_chart:
+        st.plotly_chart(index_chart, width='stretch')
+        
+        # 显示指数表现数据
+        performance = get_index_performance()
+        if performance:
+            st.markdown("### 指数表现对比")
+            col1, col2, col3 = st.columns(3)
+            for i, p in enumerate(performance):
+                with [col1, col2, col3][i]:
+                    with st.container(border=True):
+                        st.write(f"**{p['name']}**")
+                        profit_color = "green" if p['total_return'] >= 0 else "red"
+                        st.write(f"累计收益: <span style='color:{profit_color};font-weight:bold'>{'+' if p['total_return'] >= 0 else ''}{p['total_return']}%</span>", unsafe_allow_html=True)
+                        st.write(f"年化波动率: {p['annual_volatility']}%")
+                        st.write(f"夏普比率: {p['sharpe_ratio']}")
+                        drawdown_color = "red" if p['max_drawdown'] < 0 else "green"
+                        st.write(f"最大回撤: <span style='color:{drawdown_color}'>{p['max_drawdown']}%</span>", unsafe_allow_html=True)
+        
+        # 显示投资组合策略表现
+        portfolio_perf = get_portfolio_performance()
+        if portfolio_perf:
+            st.markdown("### 定投策略对比")
+            col1, col2 = st.columns(2)
+            for i, p in enumerate(portfolio_perf):
+                with [col1, col2][i]:
+                    with st.container(border=True):
+                        st.write(f"**{p['name']}**")
+                        st.write(f"累计投入: ¥{p['total_invested']:,.0f}")
+                        st.write(f"期末总值: ¥{p['final_value']:,.2f}")
+                        profit_color = "green" if p['profit'] >= 0 else "red"
+                        st.write(f"投资收益: <span style='color:{profit_color};font-weight:bold'>{'+' if p['profit'] >= 0 else ''}¥{p['profit']:,.2f} ({p['total_return']}%)</span>", unsafe_allow_html=True)
+                        st.write(f"年化收益: {p['annual_return']}%")
+                        st.write(f"年化波动率: {p['annual_volatility']}%")
+                        st.write(f"夏普比率: {p['sharpe_ratio']}")
+                        drawdown_color = "red" if p['max_drawdown'] < 0 else "green"
+                        st.write(f"最大回撤: <span style='color:{drawdown_color}'>{p['max_drawdown']}%</span>", unsafe_allow_html=True)
+    else:
+        st.info("暂无指数数据，请先下载指数数据")
+
+    # ==================== 定投计划编辑模块 ====================
+    st.divider()
+
+    st.subheader("定投计划")
+
+    # 加载定投配置和历史
+    from services.auto_invest import load_auto_invest_config, save_auto_invest_config, load_invest_history
+
+    auto_config = load_auto_invest_config()
+
+    if "auto_invest_funds" not in st.session_state:
+        st.session_state.auto_invest_funds = auto_config.get("auto_invest_funds", [])
+
+    # 编辑模式切换
+    if "auto_edit_mode" not in st.session_state:
+        st.session_state.auto_edit_mode = False
+
+    col_edit, _ = st.columns([1, 4])
+    with col_edit:
+        if st.button("编辑模式" if not st.session_state.auto_edit_mode else "退出编辑", type="primary" if st.session_state.auto_edit_mode else "secondary", key="auto_invest_edit_mode_btn"):
+            st.session_state.auto_edit_mode = not st.session_state.auto_edit_mode
+            st.rerun()
+
+    # 定投基金列表
+    st.markdown("**定投基金列表**")
+    auto_funds = st.session_state.auto_invest_funds
+
+    if st.session_state.auto_edit_mode:
+        # 编辑模式
+        for i, fund in enumerate(auto_funds):
+            with st.container():
+                col_code, col_amount, col_del = st.columns([3, 2, 1])
+
+                with col_code:
+                    fund["code"] = st.text_input("基金代码", fund.get("code", ""), key=f"auto_edit_code_{i}", label_visibility="collapsed")
+
+                with col_amount:
+                    fund["amount"] = st.number_input("每日金额", value=fund.get("amount", 0), min_value=0, step=10, key=f"auto_edit_amount_{i}", label_visibility="collapsed")
+
+                with col_del:
+                    if st.button("删除", key=f"auto_edit_del_{i}", type="secondary"):
+                        st.session_state.auto_invest_funds.pop(i)
+                        st.rerun()
+
+                st.divider()
+
+        # 添加按钮
+        if st.button("+ 添加定投基金", key="auto_edit_add"):
+            st.session_state.auto_invest_funds.append({"code": "", "amount": 0})
+            st.rerun()
+
+        # 保存按钮
+        if st.button("保存定投计划", key="auto_edit_save", type="primary"):
+            auto_config["auto_invest_funds"] = st.session_state.auto_invest_funds
+            save_auto_invest_config(auto_config)
+            st.success("定投计划已保存！")
+
+    else:
+        # 查看模式
+        if auto_funds:
+            data = []
+            for fund in auto_funds:
+                fund_name = ""
+                for category in ["nasdaq", "dividend", "gold"]:
+                    for f in st.session_state.config["funds"].get(category, []):
+                        if f["code"] == fund["code"]:
+                            fund_name = f["name"]
+                            break
+
+                data.append({
+                    "基金代码": fund["code"],
+                    "基金名称": fund_name or "-",
+                    "每日金额": f"¥{fund.get('amount', 0):,.0f}"
+                })
+            st.dataframe(data, use_container_width=True, hide_index=True)
+        else:
+            st.write("暂无定投计划")
+
+    # 显示定投总额
+    total_daily = sum(f.get("amount", 0) for f in auto_funds)
+    st.markdown(f"**每日定投总额**: ¥{total_daily:,}")
+
+    # 显示定投历史（表格形式，最多5条）
+    st.markdown("**定投历史（近5日）**")
+    history = load_invest_history()
+    if history:
+        recent_history = history[-5:]  # 显示最近5条
+        # 构建表格数据
+        history_data = []
+        for record in reversed(recent_history):
+            transactions = record.get("transactions", [])
+            for txn in transactions:
+                # 从持仓配置中查找基金名称
+                fund_name = txn.get("name", txn.get("code", "-"))
+                if fund_name == txn.get("code", "-"):
+                    # 如果name等于code，说明没有保存名称，需要从配置中查找
+                    code = txn.get("code", "")
+                    for category in ["nasdaq", "dividend", "gold"]:
+                        for f in st.session_state.config["funds"].get(category, []):
+                            if f.get("code") == code:
+                                fund_name = f.get("name", code)
+                                break
+                        if fund_name != code:
+                            break
+
+                status_icon = "⏳" if txn.get("status") == "pending" else "✅"
+                history_data.append({
+                    "日期": record["date"],
+                    "基金名称": fund_name,
+                    "代码": txn.get("code", "-"),
+                    "金额": f"¥{txn.get('amount', 0):.2f}",
+                    "净值日期": txn.get("net_value_date", "-"),
+                    "状态": status_icon
+                })
+        if history_data:
+            st.dataframe(history_data, use_container_width=True, hide_index=True)
+        else:
+            st.write("暂无定投记录")
+    else:
+        st.write("暂无定投记录")
 
 def calculate_total_profit(config, net_values):
     total_cost = 0.0
@@ -290,7 +509,9 @@ def calculate_total_profit(config, net_values):
     return total_cost, total_profit, total_profit_pct
 
 def calculate_yesterday_profit(config, net_values):
-    """计算昨日收益（基于净值日涨幅）
+    """计算昨日收益（基于历史净值数据）
+    
+    使用历史净值数据直接计算：昨日收益 = 份额 × (当前净值 - 昨日净值)
     
     根据基金类型判断数据是否可用：
     - A股基金（红利/黄金）：T日净值在T日晚上公布，允许昨天的数据
@@ -303,7 +524,6 @@ def calculate_yesterday_profit(config, net_values):
     
     yesterday_profit = 0.0
     yesterday_profit_pct = 0.0
-    total_value = 0.0
     valid_data_value = 0.0  # 使用有效数据计算的市值
     
     for category in ["nasdaq", "dividend", "gold"]:
@@ -314,38 +534,36 @@ def calculate_yesterday_profit(config, net_values):
                 shares = fund["shares"]
                 net_value = nv["net_value"]
                 
-                # 检查数据新鲜度
                 data_date = nv.get("date", "")
-                
-                # 根据基金类型判断数据是否可用
-                # 纳指QDII基金：允许今天、昨天、前天的数据（因为时差原因）
-                # A股基金：允许今天、昨天的数据
-                is_valid = False
-                if category == "nasdaq":
-                    is_valid = (data_date == today or data_date == yesterday or data_date == day_before_yesterday)
-                else:
-                    is_valid = (data_date == today or data_date == yesterday)
-                
-                if not is_valid:
+                if not data_date:
                     continue
                 
-                change_pct = nv["change"] / 100  # 转换为小数
+                # 获取历史净值数据，基准日取“当前净值日期的前一个交易日”
+                fund_history = get_fund_history_data(fund["code"])
+                previous_record = None
+                for item in fund_history.values():
+                    item_date = item.get("date", "")
+                    if item_date < data_date and (previous_record is None or item_date > previous_record.get("date", "")):
+                        previous_record = item
                 
-                # 计算当前市值
-                market_value = shares * net_value
-                total_value += market_value
-                valid_data_value += market_value
-                
-                # 计算昨日收益：假设当前市值是今日收盘后的值
-                # 昨日市值 = 当前市值 / (1 + 日涨幅)
-                # 昨日收益 = 当前市值 - 昨日市值
-                if change_pct != -1:
-                    yesterday_value = market_value / (1 + change_pct)
-                    yesterday_profit += market_value - yesterday_value
+                if previous_record:
+                    previous_net_value = previous_record["net_value"]
+                    profit = shares * (net_value - previous_net_value)
+                    yesterday_profit += profit
+                    valid_data_value += shares * net_value
+                elif "change" in nv and nv["change"] != 0:
+                    # 如果没有历史数据，使用日涨幅估算（备选方案）
+                    change_pct = nv["change"] / 100
+                    if change_pct != -1:
+                        yesterday_value = (shares * net_value) / (1 + change_pct)
+                        yesterday_profit += (shares * net_value) - yesterday_value
+                        valid_data_value += shares * net_value
     
     # 只有有效数据才计算收益率
     if valid_data_value > 0:
-        yesterday_profit_pct = (yesterday_profit / (valid_data_value - yesterday_profit)) * 100
+        denominator = valid_data_value - yesterday_profit
+        if denominator > 0:
+            yesterday_profit_pct = (yesterday_profit / denominator) * 100
     
     return yesterday_profit, yesterday_profit_pct
 
@@ -375,7 +593,7 @@ def calculate_category_total_profit(config, net_values):
     return category_cost, category_market, category_profit, category_profit_pct
 
 def calculate_category_yesterday_profit(config, net_values):
-    """计算各类资产的昨日收益"""
+    """计算各类资产的昨日收益（基于最新净值日期与前一个交易日的净值差）"""
     from datetime import datetime, timedelta
     today = datetime.now().strftime("%Y-%m-%d")
     yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -390,27 +608,26 @@ def calculate_category_yesterday_profit(config, net_values):
                 nv = net_values[fund["code"]]
                 shares = fund["shares"]
                 net_value = nv["net_value"]
-                
-                # 检查数据新鲜度
                 data_date = nv.get("date", "")
-                
-                # 根据基金类型判断数据是否可用
-                # 纳指QDII基金：允许今天、昨天、前天的数据（因为时差原因）
-                # A股基金：允许今天、昨天的数据
-                is_valid = False
-                if category == "nasdaq":
-                    is_valid = (data_date == today or data_date == yesterday or data_date == day_before_yesterday)
-                else:
-                    is_valid = (data_date == today or data_date == yesterday)
-                
-                if not is_valid:
+                if not data_date:
                     continue
                 
-                change_pct = nv["change"] / 100
+                # 获取历史净值，找当前净值日期的前一个交易日
+                fund_history = get_fund_history_data(fund["code"])
+                previous_record = None
+                for item in fund_history.values():
+                    item_date = item.get("date", "")
+                    if item_date < data_date and (previous_record is None or item_date > previous_record.get("date", "")):
+                        previous_record = item
                 
-                market_value = shares * net_value
-                if change_pct != -1:
-                    yesterday_value = market_value / (1 + change_pct)
-                    category_profit[category] += market_value - yesterday_value
+                if previous_record:
+                    previous_net_value = previous_record["net_value"]
+                    category_profit[category] += shares * (net_value - previous_net_value)
+                elif "change" in nv and nv["change"] != 0:
+                    change_pct = nv["change"] / 100
+                    if change_pct != -1:
+                        market_value = shares * net_value
+                        yesterday_value = market_value / (1 + change_pct)
+                        category_profit[category] += market_value - yesterday_value
     
     return category_profit

@@ -1,12 +1,33 @@
-# Python相关
+# Python cache / build
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
 *.pyd
 .Python
 *.egg-info/
+build/
+dist/
 
-# 数据文件（配置和历史数据）
+# Virtual environments
+venv/
+env/
+.venv/
+ENV/
+
+# Environment / secrets
+.env
+.env.*
+*.env
+*.bat
+
+# Local database and user data
+project/fund_assistant.db
+project/fund_assistant.db-*
+project/*.db
+project/*.sqlite
+project/*.sqlite3
+
+# Legacy JSON data backups / local runtime data
 project/funds_config.json
 project/auto_invest_config.json
 project/net_value_history.json
@@ -14,39 +35,36 @@ project/invest_history.json
 project/investment_config.json
 project/threshold_config.json
 
-# Streamlit相关
+# Generated reports
+project/reports/*.md
+!project/reports/.gitkeep
+
+# Logs
+*.log
+logs/
+
+# Test / coverage cache
+.pytest_cache/
+.tox/
+.coverage
+htmlcov/
+
+# Streamlit local config
 .streamlit/
 
-# 虚拟环境
-venv/
-env/
-.env/
-*.venv/
-
-# 日志文件
-*.log
-
-# 系统文件
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# IDE配置
+# IDE / editor
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# 临时文件
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
 *.tmp
 *.temp
-
-# 测试文件
-.test/
-.pytest_cache/
-.tox/
-
-# 其他
-*.bat
-project/reports/daily_report_2026-06-02.md
+*.bak

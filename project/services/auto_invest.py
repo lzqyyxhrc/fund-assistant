@@ -1,34 +1,11 @@
-import json
-import os
 from datetime import datetime, timedelta
-from services.storage import save_config
-
-AUTO_INVEST_CONFIG_PATH = "auto_invest_config.json"
-INVEST_HISTORY_PATH = "invest_history.json"
-
-def load_auto_invest_config():
-    if os.path.exists(AUTO_INVEST_CONFIG_PATH):
-        with open(AUTO_INVEST_CONFIG_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {
-        "enabled": False,
-        "last_invest_date": None,
-        "auto_invest_funds": []
-    }
-
-def save_auto_invest_config(config):
-    with open(AUTO_INVEST_CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(config, f, ensure_ascii=False, indent=2)
-
-def load_invest_history():
-    if os.path.exists(INVEST_HISTORY_PATH):
-        with open(INVEST_HISTORY_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
-
-def save_invest_history(history):
-    with open(INVEST_HISTORY_PATH, "w", encoding="utf-8") as f:
-        json.dump(history, f, ensure_ascii=False, indent=2)
+from services.storage import (
+    save_config,
+    load_auto_invest_config,
+    save_auto_invest_config,
+    load_invest_history,
+    save_invest_history
+)
 
 def is_trading_day(check_date=None):
     """判断是否为交易日（简单判断：周一到周五）"""
@@ -91,56 +68,55 @@ def get_fund_confirm_date(base_date_str, fund_category, after_15h=False):
 def confirm_pending_shares(funds_config, net_values=None):
     """检查并确认到期的待确认份额
     
-    根据净值是否已更新来确认份额：
-    - A股基金（红利/黄金）：申购日(T)净值在T日晚上公布，T日晚更新净值后即可确认
-    - QDII基金（纳指）：申购日(T)净值在T+1日晚上公布，T+1日晚更新净值后即可确认
+    根据净值日期(net_value_date)来确认份额：
+    - 支持多笔待确认订单（每笔有独立的净值日期）
+    - 当 net_value_date 的净值已更新时，即可确认该笔订单的份额
     
     Args:
         funds_config: 基金配置
-        net_values: 净值数据（用于获取申购日对应的净值）
+        net_values: 净值数据（用于获取净值日期对应的净值）
         
     Returns:
-        int: 确认的份额数量
+        int: 确认的订单数量
     """
     today = datetime.now().strftime("%Y-%m-%d")
     confirmed_count = 0
     
     for category in funds_config["funds"]:
         for fund in funds_config["funds"][category]:
-            # pending_date 是申购日期
-            pending_date = fund.get("pending_date")
-            if not pending_date:
-                continue
-                
-            # 待确认金额
-            pending_amount = fund.get("pending_amount", 0.0)
-            if pending_amount <= 0:
-                fund["pending_amount"] = 0.0
-                fund["pending_date"] = None
+            # 获取待确认订单列表（支持多笔待确认）
+            pending_orders = fund.get("pending_orders", [])
+            if not pending_orders:
                 continue
             
-            # 检查净值是否可用（只有获取到净值才能确认份额）
-            if not net_values or fund["code"] not in net_values:
-                continue
-                
-            # 判断是否可以确认（根据基金类型）
-            # - 非nasdaq基金（红利/黄金）：T日申购，T日晚净值更新后即可确认
-            # - nasdaq基金：T日申购，T+1日晚净值更新后才能确认（因为美股时差）
-            can_confirm = False
-            if category != "nasdaq":
-                # A股基金：申购日当天晚上即可确认
-                can_confirm = True
-            else:
-                # QDII基金：需要等到申购日+1天
-                pending_dt = datetime.strptime(pending_date, "%Y-%m-%d")
-                next_day = (pending_dt + timedelta(days=1)).strftime("%Y-%m-%d")
-                can_confirm = (next_day <= today)
+            # 保留未确认的订单
+            remaining_orders = []
             
-            if can_confirm:
-                # 获取申购日期对应的净值
+            for order in pending_orders:
+                # 获取订单信息
+                pending_amount = order.get("amount", 0.0)
+                net_value_date = order.get("net_value_date")
+                
+                if pending_amount <= 0 or not net_value_date:
+                    continue
+                
+                # 检查净值是否可用
+                if not net_values or fund["code"] not in net_values:
+                    remaining_orders.append(order)
+                    continue
+                
+                # 获取当前获取到的净值日期
+                current_net_value_date = net_values[fund["code"]].get("date")
+                
+                # 判断是否可以确认：当获取到的净值日期 >= 所需的净值日期时，即可确认
+                if not current_net_value_date or current_net_value_date < net_value_date:
+                    remaining_orders.append(order)
+                    continue
+                
+                # 获取净值日期对应的净值
                 order_net_value = net_values[fund["code"]]["net_value"]
                 
-                # 实际确认份额 = 待确认金额 / 申购日净值
+                # 实际确认份额 = 待确认金额 / 净值日期的净值
                 actual_shares = pending_amount / order_net_value
                 
                 shares = fund.get("shares", 0.0)
@@ -154,11 +130,66 @@ def confirm_pending_shares(funds_config, net_values=None):
                     fund["cost_price"] = order_net_value
                 
                 fund["shares"] = round(shares + actual_shares, 4)
-                fund["pending_amount"] = 0.0
-                fund["pending_date"] = None
                 confirmed_count += 1
+            
+            # 更新待确认订单列表（只保留未确认的）
+            fund["pending_orders"] = remaining_orders
     
     return confirmed_count
+
+def sync_today_pending_orders_from_history(funds_config):
+    """从今日定投历史同步待确认订单到持仓配置，避免历史已写入但配置未体现"""
+    today = datetime.now().strftime("%Y-%m-%d")
+    history = load_invest_history()
+    synced_count = 0
+    
+    for record in history:
+        if record.get("date") != today:
+            continue
+        
+        for txn in record.get("transactions", []):
+            if txn.get("status") != "pending":
+                continue
+            
+            code = txn.get("code")
+            amount = round(float(txn.get("amount", 0)), 2)
+            pending_date = txn.get("date", today)
+            net_value_date = txn.get("net_value_date")
+            category = txn.get("category") or find_fund_category(funds_config, code)
+            
+            if not code or amount <= 0 or not net_value_date or not category:
+                continue
+            
+            funds = funds_config["funds"].setdefault(category, [])
+            fund = next((item for item in funds if item.get("code") == code), None)
+            if fund is None:
+                fund = {
+                    "code": code,
+                    "name": txn.get("name", code),
+                    "shares": 0.0,
+                    "cost_price": float(txn.get("net_value", 0) or 0),
+                    "pending_orders": []
+                }
+                funds.append(fund)
+            
+            pending_orders = fund.setdefault("pending_orders", [])
+            exists = any(
+                round(float(order.get("amount", 0)), 2) == amount
+                and order.get("pending_date") == pending_date
+                and order.get("net_value_date") == net_value_date
+                for order in pending_orders
+            )
+            
+            if not exists:
+                pending_orders.append({
+                    "amount": amount,
+                    "pending_date": pending_date,
+                    "net_value_date": net_value_date
+                })
+                synced_count += 1
+    
+    return synced_count
+
 
 def has_invested_today(check_date=None):
     """检查指定日期是否已有定投记录（幂等性校验）
@@ -226,6 +257,14 @@ def execute_auto_invest(funds_config, net_values, auto_invest_funds, force=False
     if after_15h:
         print(f"当前时间 {now.strftime('%H:%M')} 已过15:00，视为T+1日申请")
     
+    # 计算净值日期：15:00前=T，15:00后=T+1
+    if after_15h:
+        net_value_date = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+    else:
+        net_value_date = today
+    
+    print(f"申购日期: {today}, 净值日期: {net_value_date}")
+    
     total_amount = 0
     transactions = []
     
@@ -249,10 +288,14 @@ def execute_auto_invest(funds_config, net_values, auto_invest_funds, force=False
                 found = False
                 for fund in funds_list:
                     if fund["code"] == code:
-                        # 将新申购金额放入待确认状态（只记录申购日期，净值在确认时获取）
-                        pending_amount = fund.get("pending_amount", 0.0)
-                        fund["pending_amount"] = round(pending_amount + amount, 2)
-                        fund["pending_date"] = today  # 申购日期（用于确认时获取对应净值）
+                        # 将新申购金额添加到待确认订单列表
+                        pending_orders = fund.get("pending_orders", [])
+                        pending_orders.append({
+                            "amount": round(amount, 2),
+                            "pending_date": today,  # 申购日期
+                            "net_value_date": net_value_date  # 净值日期（用于确认时获取对应净值）
+                        })
+                        fund["pending_orders"] = pending_orders
                         found = True
                         break
                 if not found:
@@ -261,8 +304,11 @@ def execute_auto_invest(funds_config, net_values, auto_invest_funds, force=False
                         "name": fund_name,
                         "shares": 0.0,
                         "cost_price": net_value,
-                        "pending_amount": round(amount, 2),
-                        "pending_date": today  # 申购日期
+                        "pending_orders": [{
+                            "amount": round(amount, 2),
+                            "pending_date": today,  # 申购日期
+                            "net_value_date": net_value_date  # 净值日期
+                        }]
                     })
             
             total_amount += amount
@@ -270,6 +316,7 @@ def execute_auto_invest(funds_config, net_values, auto_invest_funds, force=False
             transactions.append({
                 "date": today,
                 "confirm_date": confirm_date,
+                "net_value_date": net_value_date,  # 记录净值日期
                 "category": category or "other",
                 "code": code,
                 "name": fund_name,
