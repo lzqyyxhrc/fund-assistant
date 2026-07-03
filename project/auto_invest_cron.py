@@ -18,6 +18,13 @@ import argparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# 自动加载项目根目录 .env（若存在），把 DEEPSEEK_API_KEY/FEISHU_WEBHOOK 等注入环境变量
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+except ImportError:
+    pass
+
 from datetime import datetime
 from services.storage import load_config, save_config
 from services.fund_fetcher import get_fund_batch_net_value
@@ -54,14 +61,15 @@ def main():
     parser.add_argument("--invest", "-i", action="store_true", help="执行定投操作（建议早上10点执行）")
     parser.add_argument("--confirm", "-c", action="store_true", help="确认到期的待确认份额（建议晚上10点执行）")
     parser.add_argument("--report", "-r", action="store_true", help="生成投资日报")
+    parser.add_argument("--valuation", "-v", action="store_true", help="获取估值评分数据（建议晚上10点执行）")
     parser.add_argument("--api-key", "-k", help="DeepSeek API Key（用于生成日报）")
     parser.add_argument("--feishu", "-f", help="飞书 Webhook URL")
     args = parser.parse_args()
     
     # 检查至少指定了一个操作
-    if not args.invest and not args.confirm and not args.report:
+    if not args.invest and not args.confirm and not args.report and not args.valuation:
         parser.print_help()
-        print("\n错误：请至少指定一个操作 --invest、--confirm 或 --report")
+        print("\n错误：请至少指定一个操作 --invest、--confirm、--report 或 --valuation")
         return
     
     print("=== 基金自动定投执行脚本 ===")
@@ -144,6 +152,27 @@ def main():
         if args.report:
             print("\n" + "="*50)
             generate_report_after_invest(api_key=args.api_key, feishu_webhook=args.feishu)
+        
+        # 获取估值评分数据
+        if args.valuation:
+            print("\n" + "="*50)
+            print("获取估值数据...")
+            try:
+                from services.valuation_fetcher import fetch_all_valuations
+                from services.valuation_scoring import get_valuation_overview
+                results = fetch_all_valuations()
+                if results:
+                    print("估值数据获取成功: %s" % list(results.keys()))
+                    overview = get_valuation_overview()
+                    for a in ["nasdaq", "dividend", "gold"]:
+                        o = overview[a]
+                        print("  [%s] 分数: %.1f | %s" % (a.upper(), o["score"] if o["score"] else -1, o.get("recommendation")))
+                else:
+                    print("未获取到估值数据（请检查 API Key 是否配置）")
+            except Exception as e:
+                print("估值数据获取失败: %s" % str(e))
+                import traceback
+                traceback.print_exc()
             
     except Exception as e:
         print("执行失败: %s" % str(e))

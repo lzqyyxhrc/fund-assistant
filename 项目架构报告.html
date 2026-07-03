@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>基金智能定投再平衡系统 - 项目架构报告</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    padding: 40px 20px;
+    color: #2c3e50;
+    line-height: 1.8;
+  }
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    overflow: hidden;
+  }
+  .header {
+    background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+    color: #fff;
+    padding: 50px 60px;
+    text-align: center;
+  }
+  .header h1 {
+    font-size: 2.4em;
+    margin-bottom: 12px;
+    letter-spacing: 2px;
+  }
+  .header .subtitle {
+    font-size: 1.1em;
+    opacity: 0.9;
+    letter-spacing: 1px;
+  }
+  .content { padding: 40px 60px; }
+  h2 {
+    font-size: 1.7em;
+    color: #1e3c72;
+    border-left: 6px solid #667eea;
+    padding: 12px 20px;
+    margin: 40px 0 24px;
+    background: linear-gradient(90deg, #f8f9ff 0%, transparent 100%);
+    border-radius: 0 8px 8px 0;
+  }
+  h3 {
+    font-size: 1.25em;
+    color: #2a5298;
+    margin: 28px 0 14px;
+    padding-bottom: 8px;
+    border-bottom: 2px dashed #e0e0e0;
+  }
+  h4 {
+    font-size: 1.05em;
+    color: #34495e;
+    margin: 18px 0 10px;
+  }
+  p { margin-bottom: 14px; }
+  .overview-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin: 20px 0 30px;
+  }
+  .card {
+    background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf3 100%);
+    padding: 20px;
+    border-radius: 12px;
+    border-left: 4px solid #667eea;
+    transition: transform 0.2s;
+  }
+  .card:hover { transform: translateY(-3px); }
+  .card .num {
+    font-size: 2em;
+    font-weight: bold;
+    color: #667eea;
+  }
+  .card .label {
+    font-size: 0.95em;
+    color: #555;
+    margin-top: 4px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0 24px;
+    background: #fff;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  }
+  th {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #fff;
+    padding: 14px 16px;
+    text-align: left;
+    font-weight: 600;
+  }
+  td {
+    padding: 12px 16px;
+    border-bottom: 1px solid #eee;
+    vertical-align: top;
+  }
+  tr:nth-child(even) td { background: #fafbfd; }
+  tr:hover td { background: #f0f4ff; }
+  .tree {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    padding: 24px 30px;
+    border-radius: 10px;
+    font-family: "Consolas", "Monaco", monospace;
+    font-size: 0.92em;
+    line-height: 1.9;
+    margin: 18px 0;
+    overflow-x: auto;
+  }
+  .tree .folder { color: #4ec9b0; font-weight: bold; }
+  .tree .file { color: #9cdcfe; }
+  .tree .comment { color: #6a9955; font-style: italic; }
+  .tree .hl { color: #ffd700; font-weight: bold; }
+  pre.code {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    padding: 20px 24px;
+    border-radius: 10px;
+    font-family: "Consolas", "Monaco", monospace;
+    font-size: 0.9em;
+    line-height: 1.7;
+    overflow-x: auto;
+    margin: 16px 0;
+  }
+  pre.code .keyword { color: #569cd6; }
+  pre.code .string { color: #ce9178; }
+  pre.code .comment { color: #6a9955; }
+  pre.code .func { color: #dcdcaa; }
+  pre.code .var { color: #9cdcfe; }
+  ul, ol { margin: 12px 0 16px 24px; }
+  li { margin-bottom: 8px; }
+  .flow-diagram {
+    background: linear-gradient(135deg, #f8f9ff 0%, #f0f4ff 100%);
+    border-left: 5px solid #667eea;
+    padding: 20px 28px;
+    border-radius: 10px;
+    margin: 18px 0;
+    font-family: "Consolas", "Monaco", monospace;
+    font-size: 0.95em;
+    white-space: pre-wrap;
+    line-height: 2;
+  }
+  .toc {
+    background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf3 100%);
+    padding: 24px 30px;
+    border-radius: 12px;
+    margin: 30px 0 10px;
+  }
+  .toc h3 { border: none; padding: 0; margin: 0 0 14px; color: #1e3c72; }
+  .toc ol { margin-left: 20px; }
+  .toc a {
+    color: #2a5298;
+    text-decoration: none;
+    transition: color 0.2s;
+  }
+  .toc a:hover { color: #667eea; text-decoration: underline; }
+  .badge {
+    display: inline-block;
+    background: #667eea;
+    color: #fff;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.82em;
+    margin: 0 4px;
+  }
+  .badge-green { background: #27ae60; }
+  .badge-orange { background: #f39c12; }
+  .badge-red { background: #e74c3c; }
+  .highlight-box {
+    background: linear-gradient(135deg, #fff9e6 0%, #fff3cd 100%);
+    border-left: 5px solid #f39c12;
+    padding: 18px 24px;
+    border-radius: 8px;
+    margin: 16px 0;
+  }
+  .success-box {
+    background: linear-gradient(135deg, #e8f8f1 0%, #d4edda 100%);
+    border-left: 5px solid #27ae60;
+    padding: 18px 24px;
+    border-radius: 8px;
+    margin: 16px 0;
+  }
+  .info-box {
+    background: linear-gradient(135deg, #e8f1ff 0%, #d4e5ff 100%);
+    border-left: 5px solid #3498db;
+    padding: 18px 24px;
+    border-radius: 8px;
+    margin: 16px 0;
+  }
+  .footer {
+    text-align: center;
+    padding: 30px;
+    background: #f8f9fa;
+    color: #888;
+    font-size: 0.9em;
+    border-top: 1px solid #e0e0e0;
+  }
+  hr { border: none; border-top: 1px solid #e0e0e0; margin: 30px 0; }
+  code.inline {
+    background: #f0f4ff;
+    color: #c7254e;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: "Consolas", "Monaco", monospace;
+    font-size: 0.9em;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <h1>💰 基金智能定投再平衡系统</h1>
+    <div class="subtitle">Project Architecture Report · 项目架构报告</div>
+  </div>
+
+  <div class="content">
+
+    <div class="overview-cards">
+      <div class="card"><div class="num">10</div><div class="label">数据库表</div></div>
+      <div class="card"><div class="num">6</div><div class="label">核心服务模块</div></div>
+      <div class="card"><div class="num">5</div><div class="label">UI 组件</div></div>
+      <div class="card"><div class="num">3</div><div class="label">资产类别（纳指/红利/黄金）</div></div>
+    </div>
+
+    <div class="toc">
+      <h3>📑 目录导航</h3>
+      <ol>
+        <li><a href="#s1">项目概述</a></li>
+        <li><a href="#s2">技术栈</a></li>
+        <li><a href="#s3">目录结构</a></li>
+        <li><a href="#s4">数据库设计（SQLite）</a></li>
+        <li><a href="#s5">核心模块详解</a></li>
+        <li><a href="#s6">业务流程全景</a></li>
+        <li><a href="#s7">关键数据对象与接口清单</a></li>
+        <li><a href="#s8">配置参数</a></li>
+        <li><a href="#s9">隐私模式</a></li>
+        <li><a href="#s10">技术债与改进方向</a></li>
+        <li><a href="#s11">关键文件速查</a></li>
+      </ol>
+    </div>
+
+    <!-- ========== 一、项目概述 ========== -->
+    <h2 id="s1">一、项目概述</h2>
+    <p>本项目是一个基于 <strong>Streamlit</strong> 构建的基金投资管理系统，支持基金持仓管理、自动定投、再平衡策略、指数对比分析、净值走势跟踪等功能。系统采用 <strong>SQLite</strong> 作为结构化数据存储，使用 <strong>AkShare</strong> 和 <strong>天天基金网</strong> 作为数据源。</p>
+
+    <h3>主要功能模块</h3>
+    <div class="overview-cards">
+      <div class="card"><div class="num">📊</div><div class="label">持仓管理与资产概览</div></div>
+      <div class="card"><div class="num">💰</div><div class="label">自动定投与待确认份额管理</div></div>
+      <div class="card"><div class="num">📈</div><div class="label">指数对比与策略回测</div></div>
+      <div class="card"><div class="num">📋</div><div class="label">基金净值历史与走势分析</div></div>
+      <div class="card"><div class="num">🔒</div><div class="label">隐私模式（隐藏敏感金额）</div></div>
+      <div class="card"><div class="num">📝</div><div class="label">投资日报（AI 生成 + 飞书推送）</div></div>
+    </div>
+
+    <!-- ========== 二、技术栈 ========== -->
+    <h2 id="s2">二、技术栈</h2>
+    <table>
+      <tr><th>类别</th><th>技术</th><th>说明</th></tr>
+      <tr><td>Web 框架</td><td><strong>Streamlit</strong></td><td>构建交互式 Web 界面</td></tr>
+      <tr><td>数据库</td><td><strong>SQLite</strong></td><td>本地文件型数据库，无需独立服务</td></tr>
+      <tr><td>数据源</td><td><strong>AkShare + 天天基金网</strong></td><td>双数据源，互备兜底</td></tr>
+      <tr><td>图表</td><td><strong>Plotly</strong></td><td>交互式图表渲染</td></tr>
+      <tr><td>数据处理</td><td><strong>Pandas</strong></td><td>数据处理与计算</td></tr>
+      <tr><td>AI</td><td><strong>DeepSeek API</strong></td><td>生成专业投资日报（可选）</td></tr>
+      <tr><td>定时任务</td><td><strong>操作系统 Cron / 计划任务</strong></td><td>配合 auto_invest_cron.py</td></tr>
+    </table>
+
+    <!-- ========== 三、目录结构 ========== -->
+    <h2 id="s3">三、目录结构</h2>
+<div class="tree">
+<span class="folder">project/</span>
+├── <span class="file">app.py</span>                      <span class="comment"># 主入口，Streamlit 应用</span>
+├── <span class="file">auto_invest_cron.py</span>         <span class="comment"># 定时任务脚本（定投/确认/日报）</span>
+├── <span class="file">daily_report.py</span>             <span class="comment"># 日报生成脚本</span>
+├── <span class="file">download_index_data.py</span>      <span class="comment"># 指数数据下载</span>
+├── <span class="file">backtest.py</span>                 <span class="comment"># 策略回测脚本</span>
+├── <span class="file">requirements.txt</span>            <span class="comment"># 依赖列表</span>
+│
+├── <span class="folder">components/</span>                 <span class="comment"># UI 组件层</span>
+│   ├── <span class="file">dashboard.py</span>            <span class="comment"># 仪表盘主组件（持仓/定投/历史/指数）</span>
+│   ├── <span class="file">charts.py</span>               <span class="comment"># 图表组件（饼图/柱状图/净值走势）</span>
+│   ├── <span class="file">index_chart.py</span>          <span class="comment"># 指数对比与策略回测组件</span>
+│   ├── <span class="file">recommendation.py</span>       <span class="comment"># 定投建议组件</span>
+│   └── <span class="file">scheduler_panel.py</span>      <span class="comment"># 定时任务面板</span>
+│
+├── <span class="folder">services/</span>                   <span class="comment"># 业务逻辑层</span>
+│   ├── <span class="file">database.py</span>             <span class="comment"># 数据库操作（表结构/CRUD/数据迁移）</span>
+│   ├── <span class="file">storage.py</span>              <span class="comment"># 配置存储门面（统一 CRUD 接口）</span>
+│   ├── <span class="file">fund_fetcher.py</span>         <span class="comment"># 基金净值获取（双数据源+缓存）</span>
+│   ├── <span class="file">net_value_storage.py</span>    <span class="comment"># 净值历史数据存取</span>
+│   ├── <span class="file">auto_invest.py</span>           <span class="comment"># 定投执行与份额确认逻辑</span>
+│   └── <span class="file">calculator.py</span>          <span class="comment"># 再平衡计算与金额分配</span>
+│
+├── <span class="folder">data/index/</span>                 <span class="comment"># 指数 CSV 数据（首次导入后入库到 SQLite）</span>
+│   ├── <span class="file">NDX_20260604.csv</span>         <span class="comment"># 纳斯达克100</span>
+│   ├── <span class="file">512890_*.csv</span>            <span class="comment"># 红利低波ETF（前复权作为全收益替代）</span>
+│   ├── <span class="file">AU9999_*.csv</span>            <span class="comment"># 黄金价格</span>
+│   └── <span class="file">000015_*.csv</span>            <span class="comment"># 中证红利指数</span>
+│
+├── <span class="folder">reports/</span>                    <span class="comment"># 日报输出目录（.md 文件）</span>
+│
+└── <span class="hl">fund_assistant.db</span>              <span class="comment"># SQLite 数据库文件（运行时生成）</span>
+</div>
+
+    <!-- ========== 四、数据库设计 ========== -->
+    <h2 id="s4">四、数据库设计（SQLite）</h2>
+
+    <h3>4.1 表结构总览</h3>
+    <table>
+      <tr><th>表名</th><th>用途</th><th>关键字段</th></tr>
+      <tr><td><code class="inline">app_meta</code></td><td>通用键值设置</td><td>investment_amount、rebalance_threshold、json_migrated</td></tr>
+      <tr><td><code class="inline">portfolio_targets</code></td><td>目标资产配置</td><td>category + target_weight（nasdaq=0.4, dividend=0.4, gold=0.2）</td></tr>
+      <tr><td><code class="inline">fund_positions</code></td><td>持仓基金明细</td><td>code, name, shares, cost_price, category</td></tr>
+      <tr><td><code class="inline">pending_orders</code></td><td>待确认订单</td><td>fund_code, amount, pending_date, net_value_date, status</td></tr>
+      <tr><td><code class="inline">auto_invest_config</code></td><td>定投配置键值</td><td>enabled、last_invest_date 等</td></tr>
+      <tr><td><code class="inline">auto_invest_plans</code></td><td>定投计划</td><td>code, amount（每只基金每日定投金额）</td></tr>
+      <tr><td><code class="inline">invest_records</code></td><td>定投日期记录</td><td>trade_date, total_amount</td></tr>
+      <tr><td><code class="inline">invest_transactions</code></td><td>每笔定投交易明细</td><td>trade_date, code, name, amount, shares, net_value, status</td></tr>
+      <tr><td><code class="inline">fund_nav_history</code></td><td>基金净值历史</td><td>fund_code, record_date, nav_date, net_value, change_pct, source</td></tr>
+      <tr><td><code class="inline">index_prices</code></td><td>指数行情数据</td><td>index_code, trade_date, open, high, low, close, volume, source_file</td></tr>
+    </table>
+
+    <h3>4.2 数据迁移机制</h3>
+    <p><code class="inline">services/database.py:init_db()</code> 实现 JSON→SQLite 自动迁移：</p>
+    <ul>
+      <li>首次启动检测 <code class="inline">json_migrated</code> 标记</li>
+      <li>若未迁移，读取旧的 <code class="inline">funds_config.json</code>、<code class="inline">net_value_history.json</code> 等文件</li>
+      <li>写入对应 SQLite 表后设置迁移标记</li>
+    </ul>
+
+    <h3>4.3 核心配置对象（业务层使用）</h3>
+<pre class="code"><span class="comment"># config 对象结构（load_config 加载）</span>
+{
+  <span class="string">"targets"</span>: {<span class="string">"nasdaq"</span>: <span class="keyword">0.4</span>, <span class="string">"dividend"</span>: <span class="keyword">0.4</span>, <span class="string">"gold"</span>: <span class="keyword">0.2</span>},
+  <span class="string">"funds"</span>: {
+    <span class="string">"nasdaq"</span>: [{
+      <span class="string">"code"</span>: <span class="string">"..."</span>,
+      <span class="string">"name"</span>: <span class="string">"..."</span>,
+      <span class="string">"shares"</span>: <span class="keyword">100.0</span>,
+      <span class="string">"cost_price"</span>: <span class="keyword">1.2345</span>,
+      <span class="string">"pending_orders"</span>: [{
+        <span class="string">"amount"</span>: <span class="keyword">500</span>,
+        <span class="string">"pending_date"</span>: <span class="string">"2026-06-09"</span>,
+        <span class="string">"net_value_date"</span>: <span class="string">"2026-06-09"</span>
+      }]
+    }],
+    <span class="string">"dividend"</span>: [...],
+    <span class="string">"gold"</span>: [...]
+  }
+}</pre>
+
+    <!-- ========== 五、核心模块详解 ========== -->
+    <h2 id="s5">五、核心模块详解</h2>
+
+    <h3>5.1 应用入口 <code class="inline">app.py</code></h3>
+    <p><strong>职责：</strong>Streamlit 页面初始化、净值加载、主面板渲染</p>
+    <div class="flow-diagram">页面刷新
+  ↓
+1. 调用 load_config() 从 SQLite 读取持仓配置
+2. 收集所有基金代码 → get_fund_batch_net_value() 拉取净值
+   ├─ AkShare 优先 → 天天基金兜底 → 历史缓存兜底
+3. sync_today_pending_orders_from_history() 同步今日定投到待确认
+4. confirm_pending_shares() 检查净值日期匹配的订单，自动确认份额
+5. calculate_category_value() 计算各类市值
+6. render_dashboard() 渲染主面板</div>
+
+    <div class="flow-diagram">核心数据流向：
+SQLite (db)
+  ├→ storage.load_config() → config (持仓+目标)
+  ├→ net_value_history (历史净值)
+  └→ invest_records/transactions (定投历史)
+
+AkShare / 天天基金网
+  └→ fund_fetcher.get_fund_batch_net_value() → net_values (当日净值)
+
+components.render_dashboard()
+  ├→ 资产概览（饼图/柱状图）
+  ├→ 持仓明细表格（支持编辑模式）
+  ├→ 定投计划（支持编辑模式）
+  ├→ 定投历史（近5日）
+  ├→ 基金净值走势
+  └→ 指数对比与策略回测</div>
+
+    <h3>5.2 基金净值获取 <code class="inline">services/fund_fetcher.py</code></h3>
+    <div class="info-box">
+      <strong>双数据源+缓存机制：</strong>
+      <ol>
+        <li>检查本地缓存（net_value_history）是否为今日数据 → 命中直接返回</li>
+        <li>尝试 AkShare (fund_em_open_fund_info_em)</li>
+        <li>失败 → 尝试天天基金网 HTTP API</li>
+        <li>都失败 → 返回历史缓存兜底</li>
+      </ol>
+      <strong>缓存策略：</strong>A股基金净值日期=今日即命中；美股/QDII 净值日期=昨日也可命中（美股交易时间滞后）
+    </div>
+
+    <h3>5.3 定投执行 <code class="inline">services/auto_invest.py</code></h3>
+    <table>
+      <tr><th>函数</th><th>调用时机</th><th>作用</th></tr>
+      <tr><td><code class="inline">execute_auto_invest()</code></td><td>早上10点（或手动）</td><td>按 auto_invest_plans 配置，为每只基金创建 pending_orders，记录到 invest_transactions</td></tr>
+      <tr><td><code class="inline">confirm_pending_shares()</code></td><td>晚上10点（或页面刷新时）</td><td>遍历 pending_orders，若 net_value_date 的净值已可用，则 实际份额 = 金额 / 净值日期净值，累加到 shares，同时摊薄 cost_price</td></tr>
+    </table>
+
+    <div class="success-box">
+      <strong>✔ 幂等性保障：</strong>
+      <ul>
+        <li><code class="inline">has_invested_today()</code> 检查当日是否已有 invest_records</li>
+        <li><code class="inline">auto_invest_config.last_invest_date</code> 冗余检查</li>
+      </ul>
+    </div>
+
+    <div class="info-box">
+      <strong>📅 T+2 确认机制：</strong>
+      <ul>
+        <li>T日 10:00 定投 → 创建 pending_orders (pending_date=T, net_value_date=T)</li>
+        <li>T日 22:00 净值公布 → confirm_pending_shares() 确认份额（A股基金通常T日晚可确认）</li>
+        <li>QDII 基金可能需 T+1 或 T+2 才能拿到净值 → 订单保持 pending 直到可用</li>
+      </ul>
+    </div>
+
+    <h3>5.4 再平衡计算 <code class="inline">services/calculator.py</code></h3>
+    <div class="flow-diagram">calculate_rebalancing_amounts(targets, category_values, total_value, new_investment, threshold)
+  ├─ 计算 current_weights = 各类别市值 / 总市值
+  ├─ 计算 deviation = current_weight - target_weight
+  ├─ 若 max(abs(deviation)) > threshold → 需要再平衡
+  └─ 再平衡时：
+     - 找出 underweight（仓位不足）类别
+     - 新投入资金优先分配给偏离最大的类别
+     - 分配权重 = (缺口金额 / 总缺口) × (1 + |偏离度| × 2)
+     - 归一化确保总分配 = new_investment</div>
+
+    <h3>5.5 仪表盘主面板 <code class="inline">components/dashboard.py</code></h3>
+    <p><strong>页面布局（自上而下）：</strong></p>
+    <ol>
+      <li><strong>🔒 隐私模式开关</strong> - 开启后金额显示为 ****</li>
+      <li><strong>📈 资产概览</strong> - 总资产/持仓成本/持仓收益/基金数量四宫格，各类资产收益卡片，昨日收益分解</li>
+      <li><strong>饼图 + 柱状图</strong> - 当前资产分布 + 当前 vs 目标仓位</li>
+      <li><strong>持仓明细（支持编辑模式）</strong>
+        <ul>
+          <li>编辑模式开关 → 激活后可直接编辑 name/code/shares/cost_price</li>
+          <li>每只基金一行，支持"删除"按钮 / "+ 添加基金"按钮</li>
+          <li>"保存修改"按钮（编辑完成后一次性写入）</li>
+        </ul>
+      </li>
+      <li><strong>📈 基金净值走势</strong> - 基金选择 + 时间范围（今年以来/成立以来），Plotly 折线图含 MA120/MA250 均线</li>
+      <li><strong>📊 指数对比分析</strong> - 纳指100/红利低波/黄金三条指数曲线，对比一次性买入 vs 定投组合（无再平衡）vs 定投组合（带再平衡）</li>
+      <li><strong>定投计划（支持编辑模式）</strong> - 每只基金每日定投金额，总额汇总</li>
+      <li><strong>定投历史（近5日）</strong> - 每条交易明细，⏳待确认 / ✅已确认状态</li>
+    </ol>
+
+    <h3>5.6 指数策略回测 <code class="inline">components/index_chart.py</code></h3>
+    <p><strong>回测逻辑（backtest_dca_with_rebalancing）：</strong></p>
+    <ul>
+      <li><strong>输入：</strong>三大指数历史收盘价（从 index_prices 表读取）、目标权重（40%/40%/20%）、再平衡阈值5%、月度定投金额</li>
+      <li><strong>算法：</strong>指数标准化→模拟按月定投→每日检查仓位偏离→超阈值再平衡→计算总资产曲线/夏普比率/最大回撤</li>
+      <li><strong>输出：</strong>一次性买入组合（基准）、定投组合（无再平衡）、定投组合（5%偏差再平衡）</li>
+      <li><strong>指数数据来源：</strong>纳斯达克100(NDX)、红利低波ETF(512890，前复权替代全收益)、黄金价格(AU9999)</li>
+    </ul>
+
+    <h3>5.7 定时任务 <code class="inline">auto_invest_cron.py</code></h3>
+    <div class="info-box">
+      <strong>⏰ 建议的操作系统定时任务配置：</strong>
+      <ul>
+        <li><strong>每日 10:00（周一到周五）</strong>：<code class="inline">python auto_invest_cron.py --invest</code></li>
+        <li><strong>每日 22:00（周一到周五）</strong>：<code class="inline">python auto_invest_cron.py --confirm --report -k YOUR_DEEPSEEK_KEY -f FEISHU_WEBHOOK</code></li>
+      </ul>
+      <strong>命令行参数：</strong>
+      <ul>
+        <li><code class="inline">--invest / -i</code>：执行定投</li>
+        <li><code class="inline">--confirm / -c</code>：确认到期的待确认份额</li>
+        <li><code class="inline">--report / -r</code>：生成投资日报</li>
+        <li><code class="inline">--api-key / -k</code>：DeepSeek API Key</li>
+        <li><code class="inline">--feishu / -f</code>：飞书 Webhook URL</li>
+      </ul>
+    </div>
+
+    <h3>5.8 日报生成 <code class="inline">daily_report.py</code></h3>
+    <table>
+      <tr><th>模式</th><th>触发条件</th><th>内容</th></tr>
+      <tr><td><span class="badge">简单报告</span></td><td>无 API Key</td><td>纯本地计算，表格化展示市值/仓位/偏离度/各基金盈亏</td></tr>
+      <tr><td><span class="badge badge-green">AI 报告</span></td><td>提供 DeepSeek API Key</td><td>调用 deepseek-v4-pro 模型生成包含市场分析、投资建议、风险提示的专业报告</td></tr>
+    </table>
+    <p>支持<strong>飞书机器人 Webhook</strong> 推送。</p>
+
+    <!-- ========== 六、业务流程全景 ========== -->
+    <h2 id="s6">六、业务流程全景</h2>
+
+    <h3>6.1 日常定投流程</h3>
+    <div class="flow-diagram">┌─────────────────────────────────────────────────────────────┐
+│  交易日 10:00                                                 │
+│  auto_invest_cron.py --invest                                 │
+│    │                                                          │
+│    ├─ load_config() 读取持仓                                  │
+│    ├─ load_auto_invest_config() 读取定投计划                  │
+│    ├─ has_invested_today() 检查是否已执行（幂等）              │
+│    ├─ get_fund_batch_net_value() 获取当日净值                 │
+│    ├─ execute_auto_invest()                                   │
+│    │   ├─ 为每只计划中的基金创建 pending_orders              │
+│    │   ├─ 写入 invest_records + invest_transactions          │
+│    │   └─ 更新 auto_invest_config.last_invest_date           │
+│    └─ save_config() 持久化                                    │
+└─────────────────────────────────────────────────────────────┘
+                             ↓
+┌─────────────────────────────────────────────────────────────┐
+│  交易日 22:00（或页面刷新时自动触发）                         │
+│  app.py / auto_invest_cron.py --confirm                      │
+│    │                                                          │
+│    ├─ confirm_pending_shares(config, net_values)             │
+│    │   └─ 遍历每个 pending_order                             │
+│    │       └─ 若订单的 net_value_date 已有可用净值            │
+│    │           ├─ 实际份额 = 金额 / 净值日期净值              │
+│    │           ├─ fund.shares += 实际份额                     │
+│    │           ├─ 重新计算摊薄成本价                          │
+│    │           └─ 从 pending_orders 中移除该订单              │
+│    └─ save_config()                                           │
+└─────────────────────────────────────────────────────────────┘</div>
+
+    <h3>6.2 页面刷新时的数据加载</h3>
+    <div class="flow-diagram">用户访问 / 刷新页面
+  ↓
+1. load_config()     ← SQLite (fund_positions, pending_orders, targets)
+2. 收集所有基金代码
+3. get_fund_batch_net_value(all_codes)
+   ├─ AkShare → 缓存 → SQLite fund_nav_history
+   └─ 失败则用历史缓存兜底
+4. sync_today_pending_orders_from_history()
+   ← 从 invest_transactions 同步今日定投到 pending_orders
+5. confirm_pending_shares()
+   ← 有净值日期匹配的订单自动确认
+6. 渲染 dashboard
+   ├→ 计算各类别市值、昨日收益、偏离度
+   ├→ 生成饼图/柱状图
+   ├→ 读取 invest_records 展示近5日定投历史
+   └→ 读取 index_prices 生成指数对比图</div>
+
+    <!-- ========== 七、接口清单 ========== -->
+    <h2 id="s7">七、关键数据对象与接口清单</h2>
+
+    <h3>7.1 <code class="inline">services/storage.py</code> - 统一存储门面</h3>
+    <table>
+      <tr><th>函数</th><th>说明</th></tr>
+      <tr><td><code class="inline">load_config()</code></td><td>加载完整持仓配置（含 targets/funds/pending_orders）</td></tr>
+      <tr><td><code class="inline">save_config(config)</code></td><td>保存持仓配置到 SQLite</td></tr>
+      <tr><td><code class="inline">load_auto_invest_config()</code></td><td>加载定投配置（enabled/last_date）</td></tr>
+      <tr><td><code class="inline">save_auto_invest_config()</code></td><td>保存定投配置</td></tr>
+      <tr><td><code class="inline">load_invest_history()</code></td><td>读取定投历史（records + transactions）</td></tr>
+      <tr><td><code class="inline">save_invest_history()</code></td><td>保存定投历史</td></tr>
+      <tr><td><code class="inline">load_net_value_history()</code></td><td>读取基金净值历史</td></tr>
+      <tr><td><code class="inline">save_net_value_history()</code></td><td>保存净值历史</td></tr>
+      <tr><td><code class="inline">load/save_investment_amount()</code></td><td>每次定投金额（app_meta）</td></tr>
+      <tr><td><code class="inline">load/save_threshold()</code></td><td>再平衡阈值（app_meta）</td></tr>
+      <tr><td><code class="inline">get_category_names()</code></td><td>{nasdaq: "纳指类", dividend: "红利低波类", gold: "黄金类"}</td></tr>
+      <tr><td><code class="inline">get_category_color(category)</code></td><td>获取类别对应图表颜色</td></tr>
+    </table>
+
+    <h3>7.2 <code class="inline">services/fund_fetcher.py</code> - 净值获取</h3>
+    <table>
+      <tr><th>函数</th><th>说明</th></tr>
+      <tr><td><code class="inline">get_fund_net_value(code, use_cache=True)</code></td><td>获取单只基金最新净值 {code, date, net_value, change, source}</td></tr>
+      <tr><td><code class="inline">get_fund_batch_net_value(codes)</code></td><td>批量获取净值，返回 {code: {...}} 字典</td></tr>
+      <tr><td><code class="inline">check_data_freshness(net_values)</code></td><td>检查净值是否为最新</td></tr>
+      <tr><td><code class="inline">get_fund_info(code)</code></td><td>获取基金基本信息</td></tr>
+      <tr><td><code class="inline">get_fund_history_net_value(code)</code></td><td>获取历史净值序列</td></tr>
+      <tr><td><code class="inline">batch_update_history_net_value(codes)</code></td><td>批量更新历史净值到 SQLite</td></tr>
+    </table>
+
+    <h3>7.3 <code class="inline">services/auto_invest.py</code> - 定投逻辑</h3>
+    <table>
+      <tr><th>函数</th><th>说明</th></tr>
+      <tr><td><code class="inline">is_trading_day(date)</code></td><td>判断是否为交易日（周一~周五）</td></tr>
+      <tr><td><code class="inline">get_t_plus_n_date(base, days, after_15h)</code></td><td>计算 T+n 日期</td></tr>
+      <tr><td><code class="inline">confirm_pending_shares(config, net_values)</code></td><td>确认到期待确认份额，返回确认数量</td></tr>
+      <tr><td><code class="inline">sync_today_pending_orders_from_history(config)</code></td><td>从历史交易同步到待确认订单</td></tr>
+      <tr><td><code class="inline">has_invested_today(date)</code></td><td>检查当日是否已定投</td></tr>
+      <tr><td><code class="inline">execute_auto_invest(...)</code></td><td><strong>核心：</strong>执行定投</td></tr>
+      <tr><td><code class="inline">find_fund_category(config, code)</code></td><td>根据基金代码查找所属类别</td></tr>
+    </table>
+
+    <h3>7.4 <code class="inline">services/calculator.py</code> - 计算与再平衡</h3>
+    <table>
+      <tr><th>函数</th><th>说明</th></tr>
+      <tr><td><code class="inline">calculate_category_value(funds, net_values)</code></td><td>计算各类别市值（不含待确认份额）</td></tr>
+      <tr><td><code class="inline">calculate_current_weights(...)</code></td><td>计算当前仓位占比</td></tr>
+      <tr><td><code class="inline">calculate_deviation(...)</code></td><td>计算偏离度</td></tr>
+      <tr><td><code class="inline">is_rebalance_needed(deviations, threshold)</code></td><td>判断是否需要再平衡</td></tr>
+      <tr><td><code class="inline">calculate_rebalancing_amounts(...)</code></td><td><strong>核心：</strong>再平衡金额分配</td></tr>
+      <tr><td><code class="inline">distribute_amount_to_funds(...)</code></td><td>将金额分配到具体基金</td></tr>
+    </table>
+
+    <!-- ========== 八、配置参数 ========== -->
+    <h2 id="s8">八、配置参数（可调项）</h2>
+    <table>
+      <tr><th>参数</th><th>位置</th><th>默认值</th><th>说明</th></tr>
+      <tr><td>targets 目标权重</td><td>portfolio_targets 表</td><td>nasdaq=0.4 / dividend=0.4 / gold=0.2</td><td>三大类资产目标配置</td></tr>
+      <tr><td>rebalance_threshold</td><td>app_meta</td><td>0.02 (2%)</td><td>偏离超过此值时启用再平衡分配</td></tr>
+      <tr><td>investment_amount</td><td>app_meta</td><td>1000</td><td>每次定投基准金额</td></tr>
+      <tr><td>auto_invest_plans</td><td>SQLite 表</td><td>用户配置</td><td>每只基金的每日定投金额</td></tr>
+      <tr><td>回测再平衡阈值</td><td>index_chart.py</td><td>0.05 (5%)</td><td>策略回测中的再平衡阈值</td></tr>
+      <tr><td>月度定投金额（回测）</td><td>index_chart.py</td><td>1000</td><td>策略回测中的每月投入</td></tr>
+    </table>
+
+    <!-- ========== 九、隐私模式 ========== -->
+    <h2 id="s9">九、隐私模式</h2>
+    <p><code class="inline">components/dashboard.py</code> 顶部的 <strong>🔒 隐私模式</strong> 开关：</p>
+    <ul>
+      <li>开启后 <code class="inline">st.session_state["privacy_mode"] = True</code></li>
+      <li><code class="inline">format_money(amount)</code> 函数将金额格式化为 <code class="inline">****</code> 而非 ¥123,456.78</li>
+      <li><strong>影响范围：</strong>总资产、持仓成本、持仓市值、各基金盈亏、定投金额、昨日收益等所有涉及金额的字段</li>
+      <li><strong>不影响：</strong>基金名称、代码、份额、净值、收益率百分比（仍显示）</li>
+    </ul>
+
+    <!-- ========== 十、技术债 ========== -->
+    <h2 id="s10">十、技术债与改进方向</h2>
+    <div class="highlight-box">
+      <ol>
+        <li><strong>时区与净值日期判断：</strong>当前根据基金代码在 nasdaq 类别判断为美股，未区分跨市场基金的净值公布时间差</li>
+        <li><strong>再平衡仅通过新增资金实现：</strong>当前不卖出超配类别，仅通过新增投入向低配类别倾斜，属于"温和再平衡"</li>
+        <li><strong>定投历史的状态判断：</strong>通过检查 pending_orders 是否仍存在来判断 ⏳/✅，但 invest_transactions.status 字段未被更新同步</li>
+        <li><strong>指数数据更新：</strong>index_prices 数据目前依赖 CSV 文件手动导入，暂无每日自动更新机制</li>
+        <li><strong>无用户认证：</strong>单用户本地部署，无多用户/登录体系</li>
+        <li><strong>回测不考虑实际基金：</strong>使用指数价格模拟，与实际基金（含费率、跟踪误差）的表现有偏差</li>
+      </ol>
+    </div>
+
+    <!-- ========== 十一、关键文件速查 ========== -->
+    <h2 id="s11">十一、关键文件速查</h2>
+    <table>
+      <tr><th>文件</th><th>大致规模</th><th>主要职责</th></tr>
+      <tr><td><code class="inline">app.py</code></td><td>~90 行</td><td>应用入口，页面初始化与主流程</td></tr>
+      <tr><td><code class="inline">components/dashboard.py</code></td><td>~700 行</td><td>主面板渲染（占 UI 主体）</td></tr>
+      <tr><td><code class="inline">components/index_chart.py</code></td><td>~580 行</td><td>指数对比与定投策略回测</td></tr>
+      <tr><td><code class="inline">components/charts.py</code></td><td>~360 行</td><td>饼图/柱状图/基金净值走势/指标计算</td></tr>
+      <tr><td><code class="inline">services/database.py</code></td><td>~570 行</td><td>SQLite 表结构 + CRUD + JSON→DB 迁移</td></tr>
+      <tr><td><code class="inline">services/storage.py</code></td><td>~70 行</td><td>存储门面（封装 database.py）</td></tr>
+      <tr><td><code class="inline">services/fund_fetcher.py</code></td><td>~440 行</td><td>AkShare/天天基金双源净值获取</td></tr>
+      <tr><td><code class="inline">services/auto_invest.py</code></td><td>~360 行</td><td>定投执行 + 份额确认 + 幂等检查</td></tr>
+      <tr><td><code class="inline">services/calculator.py</code></td><td>~110 行</td><td>再平衡计算</td></tr>
+      <tr><td><code class="inline">auto_invest_cron.py</code></td><td>~150 行</td><td>定时任务执行脚本</td></tr>
+      <tr><td><code class="inline">daily_report.py</code></td><td>~400 行</td><td>日报生成（含 DeepSeek AI 模式）</td></tr>
+    </table>
+
+  </div>
+
+  <div class="footer">
+    📄 基金智能定投再平衡系统 · 项目架构报告<br>
+    Streamlit + SQLite + AkShare + Plotly + DeepSeek
+  </div>
+
+</div>
+</body>
+</html>

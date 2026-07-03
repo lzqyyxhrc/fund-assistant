@@ -5,8 +5,21 @@ from services.storage import get_category_names, get_category_color, save_config
 from services.fund_fetcher import check_data_freshness
 from services.net_value_storage import get_fund_history_data, load_net_value_history
 
+
+def format_money(amount, pattern="¥{:,.2f}"):
+    """格式化金额，隐私模式下返回 ****"""
+    if st.session_state.get("privacy_mode", False):
+        return "****"
+    return pattern.format(amount)
+
+
 def render_dashboard(category_values, current_weights, targets, net_values):
     total_value = sum(category_values.values())
+    
+    # 隐私开关（放在最前面）
+    privacy_col, _ = st.columns([1, 4])
+    with privacy_col:
+        st.session_state["privacy_mode"] = st.toggle("🔒 隐私模式", value=st.session_state.get("privacy_mode", False))
 
     total_cost, total_profit, total_profit_pct = calculate_total_profit(st.session_state.config, net_values)
     yesterday_profit, yesterday_profit_pct = calculate_yesterday_profit(st.session_state.config, net_values)
@@ -29,11 +42,11 @@ def render_dashboard(category_values, current_weights, targets, net_values):
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("总资产", f"¥{total_value:,.2f}")
+        st.metric("总资产", format_money(total_value))
     with col2:
-        st.metric("持仓成本", f"¥{total_cost:,.2f}")
+        st.metric("持仓成本", format_money(total_cost))
     with col3:
-        st.metric("持仓收益", f"¥{total_profit:,.2f}", delta=f"{total_profit_pct:.2f}%", delta_color="normal" if total_profit >= 0 else "inverse")
+        st.metric("持仓收益", format_money(total_profit), delta=f"{total_profit_pct:.2f}%" if not st.session_state.get("privacy_mode", False) else "", delta_color="normal" if total_profit >= 0 else "inverse")
     with col4:
         st.metric("基金数量", sum(len(funds) for funds in st.session_state.config["funds"].values()))
     
@@ -47,10 +60,13 @@ def render_dashboard(category_values, current_weights, targets, net_values):
         with [col1, col2, col3][i]:
             with st.container(border=True):
                 st.write(f"**{category_names[category]}**")
-                st.write(f"市值: ¥{category_market[category]:,.2f}")
-                st.write(f"成本: ¥{category_cost[category]:,.2f}")
+                st.write(f"市值: {format_money(category_market[category])}")
+                st.write(f"成本: {format_money(category_cost[category])}")
                 profit_color = "green" if category_profit[category] >= 0 else "red"
-                st.write(f"收益: <span style='color:{profit_color};font-weight:bold'>{'+' if category_profit[category] >= 0 else ''}¥{category_profit[category]:,.2f} ({category_profit_pct[category]:.2f}%)</span>", unsafe_allow_html=True)
+                if st.session_state.get("privacy_mode", False):
+                    st.write(f"收益: {format_money(category_profit[category])}")
+                else:
+                    st.write(f"收益: <span style='color:{profit_color};font-weight:bold'>{'+' if category_profit[category] >= 0 else ''}¥{category_profit[category]:,.2f} ({category_profit_pct[category]:.2f}%)</span>", unsafe_allow_html=True)
     
     st.subheader("昨日收益")
     
@@ -84,13 +100,12 @@ def render_dashboard(category_values, current_weights, targets, net_values):
     if not has_valid_data:
         # 没有任何有效数据可以计算昨日收益
         st.info("当前净值数据过于陈旧，无法计算昨日收益")
-    elif has_cache_data and yesterday_profit == 0.0:
-        # 有缓存数据但收益为0，可能是真的收益为0
-        st.info("部分基金使用缓存数据，收益计算可能不完整")
     else:
+        if has_cache_data:
+            st.caption("部分基金使用缓存数据，昨日收益按可用历史净值估算")
         col1, col2 = st.columns(2)
         with col1:
-            st.metric("昨日收益金额", f"¥{yesterday_profit:,.2f}", delta=f"{yesterday_profit_pct:.2f}%", delta_color="normal" if yesterday_profit >= 0 else "inverse")
+            st.metric("昨日收益金额", format_money(yesterday_profit), delta=f"{yesterday_profit_pct:.2f}%", delta_color="normal" if yesterday_profit >= 0 else "inverse")
         with col2:
             # 计算各类资产的昨日收益
             category_yesterday_profit = calculate_category_yesterday_profit(st.session_state.config, net_values)
@@ -104,7 +119,10 @@ def render_dashboard(category_values, current_weights, targets, net_values):
                 else:
                     st.info("今日暂无收益变动")
             else:
-                profit_text = "<br>".join([f"{category_names[k]}: {'+' if v >= 0 else ''}¥{v:,.2f}" for k, v in category_yesterday_profit.items()])
+                if st.session_state.get("privacy_mode", False):
+                    profit_text = "<br>".join([f"{category_names[k]}: ****" for k, v in category_yesterday_profit.items()])
+                else:
+                    profit_text = "<br>".join([f"{category_names[k]}: {'+' if v >= 0 else ''}¥{v:,.2f}" for k, v in category_yesterday_profit.items()])
                 st.markdown(f"**各类资产收益：**<br>{profit_text}", unsafe_allow_html=True)
     
     st.divider()
@@ -230,21 +248,37 @@ def render_dashboard(category_values, current_weights, targets, net_values):
                             max_drawdown = f"{metrics['max_drawdown'] * 100:.2f}%" if metrics['max_drawdown'] is not None else "-"
                             sharpe_ratio = f"{metrics['sharpe_ratio']:.2f}" if metrics['sharpe_ratio'] is not None else "-"
 
-                            data.append({
-                                "基金名称": fund["name"],
-                                "代码": fund["code"],
-                                "待确认金额": f"¥{pending_amount:.2f}" if pending_amount > 0 else "-",
-                                "成本价": f"¥{cost_price:.4f}",
-                                "最新净值": net_value_str,
-                                "持仓市值": f"¥{market_value:,.2f}",
-                                "持仓成本": f"¥{cost_value:,.2f}",
-                                "盈亏金额": f"¥{profit:,.2f}",
-                                "盈亏比例": f"{profit_pct:.2f}%",
-                                "年化收益": annualized_return,
-                                "最大回撤": max_drawdown,
-                                "夏普比率": sharpe_ratio
-                            })
-                    st.dataframe(data, use_container_width=True, hide_index=True)
+                            if st.session_state.get("privacy_mode", False):
+                                data.append({
+                                    "基金名称": fund["name"],
+                                    "代码": fund["code"],
+                                    "待确认金额": "****" if pending_amount > 0 else "-",
+                                    "成本价": "****",
+                                    "最新净值": net_value_str,
+                                    "持仓市值": "****",
+                                    "持仓成本": "****",
+                                    "盈亏金额": "****",
+                                    "盈亏比例": f"{profit_pct:.2f}%",
+                                    "年化收益": annualized_return,
+                                    "最大回撤": max_drawdown,
+                                    "夏普比率": sharpe_ratio
+                                })
+                            else:
+                                data.append({
+                                    "基金名称": fund["name"],
+                                    "代码": fund["code"],
+                                    "待确认金额": f"¥{pending_amount:.2f}" if pending_amount > 0 else "-",
+                                    "成本价": f"¥{cost_price:.4f}",
+                                    "最新净值": net_value_str,
+                                    "持仓市值": f"¥{market_value:,.2f}",
+                                    "持仓成本": f"¥{cost_value:,.2f}",
+                                    "盈亏金额": f"¥{profit:,.2f}",
+                                    "盈亏比例": f"{profit_pct:.2f}%",
+                                    "年化收益": annualized_return,
+                                    "最大回撤": max_drawdown,
+                                    "夏普比率": sharpe_ratio
+                                })
+                    st.dataframe(data, width='stretch', hide_index=True)
 
                     # 显示待确认金额提示
                     has_pending = any(sum(order.get("amount", 0) for order in f.get("pending_orders", [])) > 0 for f in funds)
@@ -367,6 +401,11 @@ def render_dashboard(category_values, current_weights, targets, net_values):
     else:
         st.info("暂无指数数据，请先下载指数数据")
 
+    # ==================== 估值评分系统 ====================
+    st.divider()
+    from components.valuation_panel import render_valuation_panel
+    render_valuation_panel()
+
     # ==================== 定投计划编辑模块 ====================
     st.divider()
 
@@ -436,23 +475,44 @@ def render_dashboard(category_values, current_weights, targets, net_values):
                             fund_name = f["name"]
                             break
 
-                data.append({
-                    "基金代码": fund["code"],
-                    "基金名称": fund_name or "-",
-                    "每日金额": f"¥{fund.get('amount', 0):,.0f}"
-                })
-            st.dataframe(data, use_container_width=True, hide_index=True)
+                if st.session_state.get("privacy_mode", False):
+                    data.append({
+                        "基金代码": fund["code"],
+                        "基金名称": fund_name or "-",
+                        "每日金额": "****"
+                    })
+                else:
+                    data.append({
+                        "基金代码": fund["code"],
+                        "基金名称": fund_name or "-",
+                        "每日金额": f"¥{fund.get('amount', 0):,.0f}"
+                    })
+            st.dataframe(data, width='stretch', hide_index=True)
         else:
             st.write("暂无定投计划")
 
     # 显示定投总额
     total_daily = sum(f.get("amount", 0) for f in auto_funds)
-    st.markdown(f"**每日定投总额**: ¥{total_daily:,}")
+    if st.session_state.get("privacy_mode", False):
+        st.markdown(f"**每日定投总额**: ****")
+    else:
+        st.markdown(f"**每日定投总额**: ¥{total_daily:,}")
 
     # 显示定投历史（表格形式，最多5条）
     st.markdown("**定投历史（近5日）**")
     history = load_invest_history()
     if history:
+        # 获取当前所有待确认订单，用于判断状态
+        pending_map = {}
+        for category in st.session_state.config["funds"]:
+            for fund in st.session_state.config["funds"][category]:
+                code = fund.get("code", "")
+                if not code:
+                    continue
+                for order in fund.get("pending_orders", []):
+                    key = (order["pending_date"], code, order["amount"], order["net_value_date"])
+                    pending_map[key] = True
+        
         recent_history = history[-5:]  # 显示最近5条
         # 构建表格数据
         history_data = []
@@ -471,18 +531,37 @@ def render_dashboard(category_values, current_weights, targets, net_values):
                                 break
                         if fund_name != code:
                             break
-
-                status_icon = "⏳" if txn.get("status") == "pending" else "✅"
-                history_data.append({
-                    "日期": record["date"],
-                    "基金名称": fund_name,
-                    "代码": txn.get("code", "-"),
-                    "金额": f"¥{txn.get('amount', 0):.2f}",
-                    "净值日期": txn.get("net_value_date", "-"),
-                    "状态": status_icon
-                })
+                
+                # 判断状态：是否还在待确认订单中
+                txn_key = (
+                    record["date"],
+                    txn.get("code", "-"),
+                    txn.get("amount", 0),
+                    txn.get("net_value_date", "-")
+                )
+                is_pending = txn_key in pending_map
+                status_icon = "⏳" if is_pending else "✅"
+                
+                if st.session_state.get("privacy_mode", False):
+                    history_data.append({
+                        "日期": record["date"],
+                        "基金名称": fund_name,
+                        "代码": txn.get("code", "-"),
+                        "金额": "****",
+                        "净值日期": txn.get("net_value_date", "-"),
+                        "状态": status_icon
+                    })
+                else:
+                    history_data.append({
+                        "日期": record["date"],
+                        "基金名称": fund_name,
+                        "代码": txn.get("code", "-"),
+                        "金额": f"¥{txn.get('amount', 0):.2f}",
+                        "净值日期": txn.get("net_value_date", "-"),
+                        "状态": status_icon
+                    })
         if history_data:
-            st.dataframe(history_data, use_container_width=True, hide_index=True)
+            st.dataframe(history_data, width='stretch', hide_index=True)
         else:
             st.write("暂无定投记录")
     else:

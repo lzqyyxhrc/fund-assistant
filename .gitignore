@@ -18,6 +18,8 @@ ENV/
 .env
 .env.*
 *.env
+# 但保留示例模板供他人参考
+!.env.example
 *.bat
 
 # Local database and user data
@@ -35,9 +37,17 @@ project/invest_history.json
 project/investment_config.json
 project/threshold_config.json
 
+# Scheduler runtime state
+project/data/scheduler.pid
+project/data/scheduler_state.json
+
+# yfinance cache
+yf_cache/
+
 # Generated reports
 project/reports/*.md
 !project/reports/.gitkeep
+reports/
 
 # Logs
 *.log
@@ -51,6 +61,7 @@ htmlcov/
 
 # Streamlit local config
 .streamlit/
+secrets.toml
 
 # IDE / editor
 .vscode/

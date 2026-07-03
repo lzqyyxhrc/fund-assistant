@@ -113,6 +113,19 @@ def init_db():
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (index_code, trade_date)
             );
+
+            CREATE TABLE IF NOT EXISTS valuation_metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                asset_type TEXT NOT NULL,
+                metric_name TEXT NOT NULL,
+                metric_label TEXT,
+                trade_date TEXT NOT NULL,
+                value REAL,
+                source TEXT,
+                raw_json TEXT,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(asset_type, metric_name, trade_date)
+            );
             """
         )
         migrated = conn.execute("SELECT value FROM app_meta WHERE key='json_migrated'").fetchone()
@@ -571,3 +584,107 @@ def set_setting(key, value):
             "INSERT OR REPLACE INTO app_meta(key, value) VALUES(?, ?)",
             (key, json.dumps(value, ensure_ascii=False))
         )
+
+
+# ---------- 估值指标 valuation_metrics ----------
+
+def upsert_valuation_metric(asset_type, metric_name, trade_date, value,
+                            metric_label=None, source=None, raw_json=None):
+    ensure_db()
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO valuation_metrics(
+                asset_type, metric_name, metric_label, trade_date, value, source, raw_json, updated_at
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                asset_type, metric_name, metric_label, trade_date,
+                float(value) if value is not None else None,
+                source,
+                json.dumps(raw_json, ensure_ascii=False) if raw_json is not None else None,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            )
+        )
+
+
+def bulk_upsert_valuation_metrics(rows):
+    """批量 upsert。rows = [(asset_type, metric_name, trade_date, value, metric_label, source, raw_json)]"""
+    ensure_db()
+    if not rows:
+        return 0
+    with get_connection() as conn:
+        conn.executemany(
+            """
+            INSERT OR REPLACE INTO valuation_metrics(
+                asset_type, metric_name, metric_label, trade_date, value, source, raw_json, updated_at
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    r[0], r[1], r[4] if len(r) > 4 else None, r[2],
+                    float(r[3]) if r[3] is not None else None,
+                    r[5] if len(r) > 5 else None,
+                    json.dumps(r[6], ensure_ascii=False) if len(r) > 6 and r[6] is not None else None,
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                )
+                for r in rows
+            ]
+        )
+    return len(rows)
+
+
+def get_latest_valuation(asset_type, metric_name):
+    ensure_db()
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM valuation_metrics
+            WHERE asset_type=? AND metric_name=?
+            ORDER BY trade_date DESC LIMIT 1
+            """,
+            (asset_type, metric_name)
+        ).fetchone()
+    if not row:
+        return None
+    return dict(row)
+
+
+def get_valuation_history(asset_type, metric_name, start_date=None, limit=None):
+    ensure_db()
+    sql = "SELECT * FROM valuation_metrics WHERE asset_type=? AND metric_name=?"
+    params = [asset_type, metric_name]
+    if start_date:
+        sql += " AND trade_date >= ?"
+        params.append(start_date)
+    sql += " ORDER BY trade_date"
+    if limit:
+        sql += f" LIMIT {int(limit)}"
+    with get_connection() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_latest_valuation_metric(asset_type, metric_name):
+    """获取指定资产和指标的最新值"""
+    ensure_db()
+    sql = """
+    SELECT value FROM valuation_metrics 
+    WHERE asset_type=? AND metric_name=? 
+    ORDER BY trade_date DESC LIMIT 1
+    """
+    with get_connection() as conn:
+        row = conn.execute(sql, [asset_type, metric_name]).fetchone()
+    return row["value"] if row else None
+
+
+def set_csi_dividend_valuation(pe, pb, dividend_yield):
+    """手动设置中证红利估值指标"""
+    ensure_db()
+    today = datetime.now().strftime("%Y-%m-%d")
+    rows = [
+        ("dividend", "csi_div_pe_manual", today, pe, "中证红利静态市盈率(手动)", "手动维护", None),
+        ("dividend", "csi_div_pb_manual", today, pb, "中证红利市净率(手动)", "手动维护", None),
+        ("dividend", "csi_div_yield_manual", today, dividend_yield, "中证红利股息率%(手动)", "手动维护", None),
+    ]
+    bulk_upsert_valuation_metrics(rows)
