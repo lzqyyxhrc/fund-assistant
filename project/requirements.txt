@@ -4,3 +4,4 @@ plotly>=5.18.0
 pandas>=2.0.0
 requests>=2.25.0
 python-dotenv>=1.0.0
+apscheduler>=3.10.0

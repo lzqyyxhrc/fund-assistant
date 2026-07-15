@@ -79,3 +79,7 @@ desktop.ini
 *.tmp
 *.temp
 *.bak
+
+# Docker
+docker-compose.override.yml
+.dockerignore

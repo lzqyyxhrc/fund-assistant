@@ -1,0 +1,26 @@
+name: fund-assistant
+
+services:
+  fund-assistant:
+    build: .
+    container_name: fund-assistant
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./project:/app
+      - ./project/fund_assistant.db:/app/fund_assistant.db
+      - ./project/data:/app/data
+      - ./.env:/app/.env
+    environment:
+      - FRED=${FRED:-}
+      - FMP=${FMP:-}
+      - DANJUAN_COOKIE=${DANJUAN_COOKIE:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - FEISHU_WEBHOOK=${FEISHU_WEBHOOK:-}
+    restart: unless-stopped
+    networks:
+      - fund-assistant-net
+
+networks:
+  fund-assistant-net:
+    driver: bridge

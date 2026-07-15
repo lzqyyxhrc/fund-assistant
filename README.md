@@ -74,8 +74,8 @@
 ### 1. 环境准备
 
 ```bash
-git clone https://github.com/lzqyyxhrc/-.git 基金助手
-cd 基金助手
+git clone https://github.com/lzqyyxhrc/fund-assistant.git
+cd fund-assistant
 pip install -r project/requirements.txt
 ```
 
