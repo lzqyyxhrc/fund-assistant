@@ -2,7 +2,7 @@ import streamlit as st
 from components.charts import render_fund_net_value_chart, calculate_fund_metrics
 from services.storage import get_category_names, save_config
 from services.net_value_storage import load_net_value_history
-from services.fund_fetcher import check_data_freshness
+from services.fund_fetcher import check_data_freshness, get_fund_name_by_code
 
 
 def format_money(amount, pattern="¥{:,.2f}"):
@@ -41,6 +41,14 @@ def render_positions():
 
     with col_save:
         if st.session_state.edit_mode and st.button("💾 保存修改", key="save_all_portfolio", type="primary"):
+            # 统一使用 akshare 查询的基金简称覆盖所有名称
+            for cat in ["nasdaq", "dividend", "gold"]:
+                for f in st.session_state.edit_config["funds"].get(cat, []):
+                    code = f.get("code", "").strip()
+                    if code:
+                        akshare_name = get_fund_name_by_code(code)
+                        if akshare_name:
+                            f["name"] = akshare_name
             import copy
             st.session_state.config = copy.deepcopy(st.session_state.edit_config)
             save_config(st.session_state.config)
@@ -60,10 +68,7 @@ def render_positions():
             if st.session_state.edit_mode:
                 for i, fund in enumerate(funds):
                     with st.container():
-                        col_name, col_code, col_shares, col_cost, col_del = st.columns([3, 2, 2, 2, 1])
-
-                        with col_name:
-                            fund["name"] = st.text_input("名称", fund.get("name", ""), key=f"edit_name_{category}_{i}", label_visibility="collapsed")
+                        col_code, col_shares, col_cost, col_del = st.columns([2, 2, 2, 1])
 
                         with col_code:
                             fund["code"] = st.text_input("代码", fund.get("code", ""), key=f"edit_code_{category}_{i}", label_visibility="collapsed")

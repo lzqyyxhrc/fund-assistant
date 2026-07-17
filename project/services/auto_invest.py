@@ -278,7 +278,7 @@ def execute_auto_invest(funds_config, net_values, auto_invest_funds, force=False
             
             fund_name = net_values[code].get("name", code)
             
-            category = find_fund_category(funds_config, code)
+            category = find_fund_category(funds_config, code, auto_invest_funds)
             
             # 根据基金类型计算确认日期
             confirm_date = get_fund_confirm_date(today, category, after_15h=after_15h)
@@ -329,11 +329,12 @@ def execute_auto_invest(funds_config, net_values, auto_invest_funds, force=False
     if transactions:
         history = load_invest_history()
         
-        # 再次幂等性检查：写入前最后验证
-        for record in history:
-            if record.get("date") == today:
-                print(f"写入前检查：{today} 已存在记录，跳过写入")
-                return None, 0
+        if not force:
+            # 再次幂等性检查：写入前最后验证
+            for record in history:
+                if record.get("date") == today:
+                    print(f"写入前检查：{today} 已存在记录，跳过写入")
+                    return None, 0
         
         history.append({
             "date": today,
@@ -351,18 +352,24 @@ def execute_auto_invest(funds_config, net_values, auto_invest_funds, force=False
     
     return transactions, total_amount
 
-def check_and_execute_auto_invest(funds_config, net_values):
+def check_and_execute_auto_invest(funds_config, net_values, force=False):
     auto_config = load_auto_invest_config()
     
-    if should_auto_invest_now(auto_config):
+    if force or should_auto_invest_now(auto_config):
         auto_invest_funds = auto_config.get("auto_invest_funds", [])
-        return execute_auto_invest(funds_config, net_values, auto_invest_funds)
+        return execute_auto_invest(funds_config, net_values, auto_invest_funds, force=force)
     
     return None, 0
 
-def find_fund_category(funds_config, code):
+def find_fund_category(funds_config, code, auto_invest_funds=None):
     for category, funds in funds_config["funds"].items():
         for fund in funds:
             if fund["code"] == code:
                 return category
+
+    if auto_invest_funds:
+        for fund_plan in auto_invest_funds:
+            if fund_plan.get("code") == code:
+                return fund_plan.get("category", "dividend")
+
     return None

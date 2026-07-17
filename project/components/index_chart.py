@@ -15,7 +15,7 @@ def load_index_data(data_dir="data/index"):
     """加载所有指数数据"""
     indices = {
         "NDX": {"name": "纳斯达克100", "color": "#1E90FF"},
-        "512890": {"name": "红利低波ETF", "color": "#32CD32"},
+        "000922": {"name": "中证红利净收益", "color": "#32CD32"},
         "AU9999": {"name": "黄金", "color": "#FFD700"}
     }
 
@@ -217,7 +217,7 @@ def render_index_comparison_chart():
     # 计算投资组合策略（40%纳指 + 40%红利 + 20%黄金）
     weights = {
         "NDX": 0.4,    # 纳斯达克100
-        "512890": 0.4, # 红利低波ETF
+        "000922": 0.4, # 中证红利全收益
         "AU9999": 0.2  # 黄金
     }
 
@@ -333,6 +333,14 @@ def render_index_comparison_chart():
             'y': 0.95,
             'font': {'size': 16, 'weight': 'bold'}
         },
+        annotations=[dict(
+            text='中证红利净收益指数数据来源：<a href="https://www.csindex.com.cn/#/indices/family/detail?indexCode=000922">中证指数官网</a>',
+            showarrow=False,
+            xref='paper', yref='paper',
+            x=0.5, y=-0.45,
+            font={'size': 10, 'color': '#666'},
+            align='center'
+        )],
         xaxis_title='日期',
         yaxis_title='标准化净值 / 定投净值（100为投入本金）',
         legend=dict(
@@ -343,7 +351,7 @@ def render_index_comparison_chart():
             x=0.5
         ),
         hovermode='x unified',
-        margin=dict(l=50, r=50, t=80, b=140),
+        margin=dict(l=50, r=50, t=80, b=200),
         template='plotly_white'
     )
 
@@ -392,6 +400,10 @@ def get_index_performance():
         last_close = df['close'].iloc[-1]
         total_return = (last_close / first_close - 1) * 100
 
+        # 计算年化收益率（时间加权）
+        days = (df['date'].iloc[-1] - df['date'].iloc[0]).days
+        annual_return = ((last_close / first_close) ** (365.25 / days) - 1) * 100 if days > 0 else 0
+
         returns = df['close'].pct_change().dropna()
         annual_volatility = returns.std() * (252 ** 0.5) * 100
         sharpe_ratio = (returns.mean() * 252) / (returns.std() * (252 ** 0.5)) if returns.std() > 0 else 0
@@ -406,6 +418,7 @@ def get_index_performance():
             'name': info['name'],
             'color': info['color'],
             'total_return': round(total_return, 2),
+            'annual_return': round(annual_return, 2),
             'annual_volatility': round(annual_volatility, 2),
             'sharpe_ratio': round(sharpe_ratio, 2),
             'max_drawdown': round(max_drawdown, 2)
@@ -517,7 +530,7 @@ def get_portfolio_performance():
     # 权重配置
     weights = {
         "NDX": 0.4,
-        "512890": 0.4,
+        "000922": 0.4,
         "AU9999": 0.2
     }
 

@@ -33,10 +33,13 @@ def render_auto_invest():
     if st.session_state.auto_edit_mode:
         for i, fund in enumerate(auto_funds):
             with st.container():
-                col_code, col_amount, col_del = st.columns([3, 2, 1])
+                col_code, col_cat, col_amount, col_del = st.columns([2, 1, 2, 1])
 
                 with col_code:
                     fund["code"] = st.text_input("基金代码", fund.get("code", ""), key=f"auto_edit_code_{i}", label_visibility="collapsed")
+
+                with col_cat:
+                    fund["category"] = st.selectbox("类别", ["dividend", "nasdaq", "gold"], index=["dividend", "nasdaq", "gold"].index(fund.get("category", "dividend")), key=f"auto_edit_cat_{i}", label_visibility="collapsed")
 
                 with col_amount:
                     fund["amount"] = st.number_input("每日金额", value=fund.get("amount", 0), min_value=0, step=10, key=f"auto_edit_amount_{i}", label_visibility="collapsed")
@@ -49,7 +52,7 @@ def render_auto_invest():
                 st.divider()
 
         if st.button("+ 添加定投基金", key="auto_edit_add"):
-            st.session_state.auto_invest_funds.append({"code": "", "amount": 0})
+            st.session_state.auto_invest_funds.append({"code": "", "category": "dividend", "amount": 0})
             st.rerun()
 
         if st.button("保存定投计划", key="auto_edit_save", type="primary"):
@@ -122,7 +125,4 @@ def render_auto_invest():
 
     st.divider()
     
-    st.subheader("⏰ 定时任务管理")
-    
-    from components.scheduler_panel import render_scheduler_panel
-    render_scheduler_panel()
+    st.caption("💡 定时任务管理已迁移到侧边栏「⏰ 定时任务管理」，可在此查看运行状态和手动触发")

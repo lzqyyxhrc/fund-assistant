@@ -216,7 +216,7 @@ def _init_scheduler():
 
 
 # ---------- 任务实现 ----------
-def execute_daily_invest():
+def execute_daily_invest(force=False):
     """每日定投任务（早上 10:00 执行）"""
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 开始执行每日定投任务...")
 
@@ -238,6 +238,12 @@ def execute_daily_invest():
                 if fund["code"]:
                     all_codes.append(fund["code"])
 
+        # 同时获取定投计划中尚未在持仓里的基金净值
+        for fund_plan in auto_config.get("auto_invest_funds", []):
+            code = fund_plan.get("code", "").strip()
+            if code and code not in all_codes:
+                all_codes.append(code)
+
         if not all_codes:
             print("未配置基金代码")
             return
@@ -251,7 +257,7 @@ def execute_daily_invest():
 
         print("成功获取基金净值")
 
-        transactions, total_amount = check_and_execute_auto_invest(funds_config, net_values)
+        transactions, total_amount = check_and_execute_auto_invest(funds_config, net_values, force=force)
 
         if transactions:
             print(f"自动定投完成！共投入 ¥{total_amount:.2f}")
@@ -407,7 +413,7 @@ def get_scheduler_jobs():
 def run_job_now(job_id):
     """立即执行指定任务（不受日期去重限制，手动触发）"""
     job_mapping = {
-        "daily_invest": execute_daily_invest,
+        "daily_invest": lambda: execute_daily_invest(force=True),
         "confirm_shares": execute_confirm_shares,
         "daily_report": execute_daily_report,
     }

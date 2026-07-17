@@ -257,33 +257,4 @@ def render_dashboard():
     
     st.divider()
     
-    st.subheader("⚡ 快捷操作")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("🔄 刷新净值数据", type="primary"):
-            from services.fund_fetcher import get_fund_batch_net_value
-            all_codes = []
-            for category in ["nasdaq", "dividend", "gold"]:
-                for fund in config["funds"].get(category, []):
-                    if fund["code"]:
-                        all_codes.append(fund["code"])
-            if all_codes:
-                with st.spinner("正在获取最新净值..."):
-                    st.session_state.net_values = get_fund_batch_net_value(all_codes)
-                st.success("净值数据已更新！")
-                st.rerun()
-    with col2:
-        if st.button("📊 更新估值评分", type="primary"):
-            from services.valuation_fetcher import update_all_valuation_data
-            with st.spinner("正在更新估值数据..."):
-                update_all_valuation_data()
-            st.success("估值数据已更新！")
-    with col3:
-        if st.button("📝 生成日报", type="primary"):
-            from daily_report import generate_daily_report
-            with st.spinner("正在生成日报..."):
-                report_path = generate_daily_report()
-            if report_path:
-                st.success(f"日报已生成：{report_path}")
-            else:
-                st.warning("生成日报失败，请检查日志")
+    st.caption("💡 数据刷新、估值更新、日报生成等操作已统一迁移到侧边栏「📊 数据控制中心」")

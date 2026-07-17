@@ -19,10 +19,13 @@ def render_index_analysis():
                         st.write(f"**{p['name']}**")
                         profit_color = "green" if p['total_return'] >= 0 else "red"
                         st.write(f"累计收益: <span style='color:{profit_color};font-weight:bold'>{'+' if p['total_return'] >= 0 else ''}{p['total_return']}%</span>", unsafe_allow_html=True)
+                        st.write(f"年化收益: {p['annual_return']}%")
                         st.write(f"年化波动率: {p['annual_volatility']}%")
                         st.write(f"夏普比率: {p['sharpe_ratio']}")
                         drawdown_color = "red" if p['max_drawdown'] < 0 else "green"
                         st.write(f"最大回撤: <span style='color:{drawdown_color}'>{p['max_drawdown']}%</span>", unsafe_allow_html=True)
+        
+        st.markdown("*中证红利净收益指数数据来源：[中证指数官网](https://www.csindex.com.cn/#/indices/family/detail?indexCode=000922)*")
         
         portfolio_perf = get_portfolio_performance()
         if portfolio_perf:

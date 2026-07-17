@@ -43,14 +43,12 @@ def render_scheduler_panel():
         if jobs:
             for job in jobs:
                 with st.container(border=True):
-                    col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
+                    col1, col2, col3 = st.columns([2, 2, 1])
                     with col1:
                         st.write(f"**{job['name']}**")
                     with col2:
-                        st.write(f"触发规则: {job['trigger']}")
-                    with col3:
                         st.write(f"下次执行: {job['next_run_time']}")
-                    with col4:
+                    with col3:
                         if st.button(f"立即执行", key=f"run_{job['id']}", width='stretch'):
                             success, msg = run_job_now(job['id'])
                             if success:

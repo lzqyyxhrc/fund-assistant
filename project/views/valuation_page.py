@@ -32,22 +32,13 @@ def render_valuation():
         st.caption(f"当前 Cookie：{masked}")
         new_cookie = st.text_area("粘贴新的 Cookie", value="", height=80,
                                   placeholder="device_id=...; xq_a_token=...; u=...")
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("💾 保存 Cookie", type="primary"):
-                if new_cookie.strip():
-                    set_api_key("danjuan_cookie", new_cookie.strip())
-                    st.success("Cookie 已保存！点击右侧按钮重新获取数据验证。")
-                    st.rerun()
-                else:
-                    st.warning("请先粘贴 Cookie")
-        with col2:
-            if st.button("🔄 重新获取全部估值", type="secondary"):
-                from services.valuation_fetcher import fetch_all_valuations
-                with st.spinner("正在更新估值数据..."):
-                    fetch_all_valuations()
-                st.success("估值数据已更新！")
+        if st.button("💾 保存 Cookie", type="primary"):
+            if new_cookie.strip():
+                set_api_key("danjuan_cookie", new_cookie.strip())
+                st.success("Cookie 已保存！刷新估值数据验证有效性。")
                 st.rerun()
+            else:
+                st.warning("请先粘贴 Cookie")
 
     st.divider()
 

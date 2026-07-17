@@ -2,7 +2,7 @@ import streamlit as st
 from components.charts import render_pie_chart, render_bar_chart, render_fund_net_value_chart, calculate_fund_metrics
 from components.index_chart import render_index_comparison_chart, get_index_performance, get_portfolio_performance
 from services.storage import get_category_names, get_category_color, save_config
-from services.fund_fetcher import check_data_freshness
+from services.fund_fetcher import check_data_freshness, get_fund_name_by_code
 from services.net_value_storage import get_fund_history_data, load_net_value_history
 
 
@@ -161,6 +161,14 @@ def render_dashboard(category_values, current_weights, targets, net_values):
 
     with col_save:
         if st.session_state.edit_mode and st.button("💾 保存修改", key="save_all_portfolio", type="primary"):
+            # 统一使用 akshare 查询的基金简称覆盖所有名称
+            for cat in ["nasdaq", "dividend", "gold"]:
+                for f in st.session_state.edit_config["funds"].get(cat, []):
+                    code = f.get("code", "").strip()
+                    if code:
+                        akshare_name = get_fund_name_by_code(code)
+                        if akshare_name:
+                            f["name"] = akshare_name
             import copy
             st.session_state.config = copy.deepcopy(st.session_state.edit_config)
             save_config(st.session_state.config)
@@ -180,13 +188,10 @@ def render_dashboard(category_values, current_weights, targets, net_values):
             funds = work_config["funds"].get(category, [])
 
             if st.session_state.edit_mode:
-                # 编辑模式：显示可编辑的卡片
+                # 编辑模式：显示可编辑的卡片（名称自动根据代码查询，无需手动输入）
                 for i, fund in enumerate(funds):
                     with st.container():
-                        col_name, col_code, col_shares, col_cost, col_del = st.columns([3, 2, 2, 2, 1])
-
-                        with col_name:
-                            fund["name"] = st.text_input("名称", fund.get("name", ""), key=f"edit_name_{category}_{i}", label_visibility="collapsed")
+                        col_code, col_shares, col_cost, col_del = st.columns([2, 2, 2, 1])
 
                         with col_code:
                             fund["code"] = st.text_input("代码", fund.get("code", ""), key=f"edit_code_{category}_{i}", label_visibility="collapsed")
@@ -375,10 +380,13 @@ def render_dashboard(category_values, current_weights, targets, net_values):
                         st.write(f"**{p['name']}**")
                         profit_color = "green" if p['total_return'] >= 0 else "red"
                         st.write(f"累计收益: <span style='color:{profit_color};font-weight:bold'>{'+' if p['total_return'] >= 0 else ''}{p['total_return']}%</span>", unsafe_allow_html=True)
+                        st.write(f"年化收益: {p['annual_return']}%")
                         st.write(f"年化波动率: {p['annual_volatility']}%")
                         st.write(f"夏普比率: {p['sharpe_ratio']}")
                         drawdown_color = "red" if p['max_drawdown'] < 0 else "green"
                         st.write(f"最大回撤: <span style='color:{drawdown_color}'>{p['max_drawdown']}%</span>", unsafe_allow_html=True)
+        
+        st.markdown("*中证红利净收益指数数据来源：[中证指数官网](https://www.csindex.com.cn/#/indices/family/detail?indexCode=000922)*")
         
         # 显示投资组合策略表现
         portfolio_perf = get_portfolio_performance()
@@ -437,10 +445,13 @@ def render_dashboard(category_values, current_weights, targets, net_values):
         # 编辑模式
         for i, fund in enumerate(auto_funds):
             with st.container():
-                col_code, col_amount, col_del = st.columns([3, 2, 1])
+                col_code, col_cat, col_amount, col_del = st.columns([2, 1, 2, 1])
 
                 with col_code:
                     fund["code"] = st.text_input("基金代码", fund.get("code", ""), key=f"auto_edit_code_{i}", label_visibility="collapsed")
+
+                with col_cat:
+                    fund["category"] = st.selectbox("类别", ["dividend", "nasdaq", "gold"], index=["dividend", "nasdaq", "gold"].index(fund.get("category", "dividend")), key=f"auto_edit_cat_{i}", label_visibility="collapsed")
 
                 with col_amount:
                     fund["amount"] = st.number_input("每日金额", value=fund.get("amount", 0), min_value=0, step=10, key=f"auto_edit_amount_{i}", label_visibility="collapsed")
@@ -454,7 +465,7 @@ def render_dashboard(category_values, current_weights, targets, net_values):
 
         # 添加按钮
         if st.button("+ 添加定投基金", key="auto_edit_add"):
-            st.session_state.auto_invest_funds.append({"code": "", "amount": 0})
+            st.session_state.auto_invest_funds.append({"code": "", "category": "dividend", "amount": 0})
             st.rerun()
 
         # 保存按钮

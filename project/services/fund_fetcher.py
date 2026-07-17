@@ -4,10 +4,29 @@ import time
 import requests
 import json
 from datetime import datetime, timedelta
+from functools import lru_cache
 from services.net_value_storage import get_net_value_from_history, save_net_value_to_history
 
 # 蛋卷基金估值数据接口
 DANJUAN_VALUATION_URL = "https://danjuanfunds.com/djapi/valuation/"
+
+
+@lru_cache(maxsize=1)
+def _get_all_fund_names():
+    """获取所有基金代码→名称的映射（带缓存，避免重复请求）"""
+    try:
+        df = ak.fund_name_em()
+        return dict(zip(df["基金代码"], df["基金简称"]))
+    except Exception as e:
+        print(f"获取基金名称列表失败: {e}")
+        return {}
+
+
+def get_fund_name_by_code(fund_code):
+    """根据基金代码获取基金简称"""
+    name_map = _get_all_fund_names()
+    return name_map.get(fund_code)
+
 
 def get_fund_net_value_from_akshare(fund_code):
     """从 AkShare 获取基金净值"""

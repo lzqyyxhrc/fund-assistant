@@ -15,7 +15,6 @@ import json
 import requests
 import traceback
 from datetime import datetime
-from openai import OpenAI
 from services.storage import load_config as load_config_from_db
 from services.net_value_storage import load_net_value_history
 
@@ -621,6 +620,12 @@ def generate_daily_report(api_key=None):
     # ---- 调用 DeepSeek ----
     print("[日报] 使用 DeepSeek API 生成增强版报告...")
 
+    try:
+        from openai import OpenAI
+    except ImportError:
+        print("[日报] openai 库未安装，回退到结构化模板报告")
+        return generate_simple_report()
+
     client = OpenAI(
         api_key=api_key,
         base_url="https://api.deepseek.com",
@@ -763,40 +768,96 @@ def save_report(report_content):
     return filename
 
 
+def _split_content(text, max_len=900):
+    """将长文本按段落拆分为多个片段，每个片段不超过 max_len 字符"""
+    segments = []
+    # 优先按双换行（段落）拆分
+    paragraphs = text.split("\n\n")
+    current = ""
+    for para in paragraphs:
+        # 如果单个段落就超过限制，按行拆分
+        if len(para) > max_len:
+            # 先把 current 存起来
+            if current:
+                segments.append(current.strip())
+                current = ""
+            # 按行拆分长段落
+            lines = para.split("\n")
+            for line in lines:
+                if len(current) + len(line) + 1 > max_len:
+                    if current:
+                        segments.append(current.strip())
+                    current = line
+                else:
+                    current = (current + "\n" + line) if current else line
+        elif len(current) + len(para) + 2 > max_len:
+            if current:
+                segments.append(current.strip())
+            current = para
+        else:
+            current = (current + "\n\n" + para) if current else para
+    if current:
+        segments.append(current.strip())
+    return segments
+
+
 def send_to_feishu(report_content, webhook_url):
-    """发送报告到飞书机器人"""
+    """发送报告到飞书机器人（超长自动分段发送，每段不超过1000字）"""
     today = datetime.now().strftime("%Y-%m-%d")
     report_content = decode_unicode_text(report_content)
 
-    # 飞书消息有字数限制，超长时截断并提示查看文件
-    preview = report_content
-    if len(preview) > 3000:
-        preview = preview[:2900] + f"\n\n...（报告过长，已截断，完整报告请查看 reports/daily_report_{today}.md）"
+    # 拆分为多个片段（留足标题前缀空间）
+    segments = _split_content(report_content, max_len=900)
+    total = len(segments)
+    header = f"【{today} 基金投资日报】"
 
-    payload = {
-        "msg_type": "text",
-        "content": {"text": f"【{today} 基金投资日报】\n\n{preview}"},
-    }
+    def _send(text):
+        payload = {
+            "msg_type": "text",
+            "content": {"text": text},
+        }
+        try:
+            resp = requests.post(
+                webhook_url,
+                headers={"Content-Type": "application/json"},
+                data=json.dumps(payload, ensure_ascii=False),
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                result = resp.json()
+                if result.get("code") == 0:
+                    return True
+                print(f"[日报] 飞书发送失败: {result.get('msg', '未知错误')}")
+            else:
+                print(f"[日报] 飞书发送失败，HTTP状态码: {resp.status_code}")
+        except Exception as e:
+            print(f"[日报] 发送到飞书失败: {e}")
+        return False
 
-    try:
-        response = requests.post(
-            webhook_url,
-            headers={"Content-Type": "application/json"},
-            data=json.dumps(payload, ensure_ascii=False),
-            timeout=15,
-        )
-        if response.status_code == 200:
-            result = response.json()
-            if result.get("code") == 0:
-                print("[日报] 已发送到飞书")
-                return True
-            print(f"[日报] 飞书发送失败: {result.get('msg', '未知错误')}")
+    if total == 1:
+        # 一段就能装下
+        ok = _send(f"{header}\n\n{segments[0]}")
+        if ok:
+            print("[日报] 已发送到飞书")
+        return ok
+
+    # 多段发送
+    all_ok = True
+    for i, seg in enumerate(segments, 1):
+        if i == 1:
+            text = f"{header} ({i}/{total})\n\n{seg}"
         else:
-            print(f"[日报] 飞书发送失败，HTTP状态码: {response.status_code}")
-    except Exception as e:
-        print(f"[日报] 发送到飞书失败: {e}")
+            text = f"{header} ({i}/{total}) 续\n\n{seg}"
+        ok = _send(text)
+        if not ok:
+            all_ok = False
+            print(f"[日报] 第 {i}/{total} 段发送失败")
+        import time
+        time.sleep(2.0)  # 避免触发飞书频率限制
 
-    return False
+    if all_ok:
+        print(f"[日报] 已发送到飞书（共 {total} 段）")
+    return all_ok
 
 
 # ============================================================
